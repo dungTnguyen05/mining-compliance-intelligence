@@ -1,0 +1,151 @@
+Invoice No, Delivery Date,Fuel Type ,Quantity, Unit,Cost (AUD),Site Area
+INV-40641,2025-12-19,Diesel,96595,L,"$182,946.64",Processing Plant
+INV-40624,Oct-25,Diesel,71053,litres,132182.58,Open Cut - North Pit
+INV-40896,21/05/2026,Diesel,42324,litres,81992.56,Haul Fleet
+INV-40737,Feb-26,Diesel,50247,litres,"$89,551.63",Processing Plant
+INV-40497,Aug-25,Diesel,36216,L,62447.14,Processing Plant
+INV-40759,2026-02-27,Diesel,48191,L,89924.38,Site Services
+INV-40413,2025-06-18,Diesel,49429,L,"$94,192.48",Open Cut - North Pit
+INV-40521,16/08/2025,Diesel,51407,L,94460.47,Processing Plant
+INV-40373,10/05/2025,Diesel,84.03,kL,"$152,369.51",Open Cut - North Pit
+INV-40263,02/02/2025,Diesel,79189,L,"$145,560.05",Processing Plant
+INV-40470,09/07/2025,Diesel,60525,L,113369.91,Processing Plant
+INV-40351,May-25,Diesel,74878,L,"$129,996.16",Open Cut - North Pit
+INV-40677,10/01/2026,Diesel,64.43,kL,124449.79,Processing Plant
+INV-40589,08/10/2025,Diesel,57529,Litres,105132.61,Haul Fleet
+INV-40349,09/05/2025,Diesel,63515,L,"$118,631.25",Open Cut - South Pit
+INV-40312,19/04/2025,Diesel,105563,L,203082.12,Open Cut - North Pit
+INV-40245,14/02/2025,Diesel,85.38,kL,164005.94,Haul Fleet
+INV-40729,15/01/2026,Petrol (ULP),4183,L,7738.55,Light Vehicles
+INV-40901,2026-05-06,Diesel,38735,L,72978.79,Haul Fleet
+INV-40929,2026-06-09,Diesel,77529,Litres,140151.41,Open Cut - South Pit
+INV-40232,Jan-25,Diesel,93673,L,"$168,569.84",Open Cut - North Pit
+INV-40915,15/05/2026,Petrol (ULP),5150,L,9527.50,Light Vehicles
+INV-40497,Aug-25,Diesel,36216,L,62447.14,Processing Plant
+INV-40258,2025-02-07,Diesel,103468,L,186724.12,Open Cut - South Pit
+INV-40418,10/06/2025,Diesel,59.85,kL,108669.87,Open Cut - South Pit
+INV-40822,2026-03-25,Diesel,159134,L,305321.08,Open Cut - North Pit
+INV-40700,19/01/2026,Diesel,53865,L,"$96,374.56",Site Services
+INV-40223,27/01/2025,Diesel,79174,L,145519.90,Open Cut - South Pit
+INV-40468,09/07/2025,Diesel,38159,L,65679.54,Haul Fleet
+INV-40828,15/03/2026,Petrol (ULP),4066,L,7522.10,Light Vehicles
+INV-40554,2025-09-14,Diesel,48420,L,85395.49,Haul Fleet
+INV-40567,2025-09-13,Diesel,104234,L,189269.05,Site Services
+INV-40815,16/03/2026,Diesel,100209,Litres,"$191,171.80",Open Cut - South Pit
+INV-40777,10/02/2026,Diesel,37102,L,"$67,060.13",Open Cut - South Pit
+INV-40898,02/05/2026,Diesel,59.16,kL,"$112,037.19",Open Cut - South Pit
+INV-40893,May-26,Diesel,80330,litres,148530.68,Open Cut - North Pit
+INV-40457,26/07/2025,Diesel,49771,L,"$88,065.96",Open Cut - North Pit
+INV-40800,07/03/2026,Diesel,74883,Litres,"$139,008.85",Light Vehicles
+INV-40366,19/05/2025,Diesel,99133,L,172767.20,Open Cut - North Pit
+INV-40821,24/03/2026,Diesel,122.81,kL,"$233,661.27",Open Cut - North Pit
+INV-40841,04/04/2026,Diesel,57273,L,101352.77,Haul Fleet
+INV-40447,11/07/2025,Diesel,39167,Litres,71374.20,Open Cut - North Pit
+INV-40649,Dec-25,Diesel,53060,L,94828.31,Processing Plant
+INV-40869,15/04/2026,Petrol (ULP),3990,L,7381.50,Light Vehicles
+INV-40522,15/08/2025,Diesel,65232,L,"$114,806.31",Open Cut - South Pit
+INV-40751,24/02/2026,Diesel,67961,L,120384.57,Open Cut - North Pit
+INV-40953,Jun-26,Diesel,40043,L,75592.17,Haul Fleet
+INV-40791,25/02/2026,Diesel,43731,L,76164.98,Haul Fleet
+INV-40597,02/10/2025,Diesel,51036,Litres,"$95,549.34",Processing Plant
+INV-40803,22/03/2026,Diesel,115595,L,215782.05,Open Cut - South Pit
+INV-40860,Apr-26,Diesel,87252,litres,162505.97,Open Cut - South Pit
+INV-40887,16/05/2026,Diesel,59434,L,110617.85,Open Cut - North Pit
+INV-40715,26/01/2026,Diesel,29261,litres,56300.84,Haul Fleet
+INV-40514,2025-08-09,Diesel,48397,Litres,"$88,413.55",Haul Fleet
+INV-40693,23/01/2026,Diesel,54227,L,97204.44,Open Cut - South Pit
+INV-40292,23/03/2025,Diesel,74568,L,"$136,748.68",Open Cut - North Pit
+INV-40962,Jun-26,Diesel,71897,L,132468.35,Processing Plant
+INV-40633,15/10/2025,Petrol (ULP),3891,L,7198.35,Light Vehicles
+INV-40583,15/09/2025,Petrol (ULP),4492,L,8310.20,Light Vehicles
+INV-40320,14/04/2025,Diesel,58039,litres,"$112,408.47",Haul Fleet
+INV-40745,Feb-26,Diesel,42233,L,75728.80,Open Cut - South Pit
+INV-40925,05/06/2026,Diesel,38877,L,72436.24,Haul Fleet
+INV-40769,16/02/2026,Diesel,65196,L,118017.72,Open Cut - North Pit
+INV-40916,Jun-26,Diesel,59232,L,106843.27,Open Cut - South Pit
+INV-40572,2025-09-19,Diesel,78477,L,149236.62,Open Cut - South Pit
+INV-40505,13/08/2025,Diesel,49276,L,94006.25,Open Cut - South Pit
+INV-40217,12/01/2025,Diesel,83196,Litres,"$144,967.86",Open Cut - South Pit
+INV-40877,15/05/2026,Diesel,80.39,kL,144817.46,Site Services
+INV-40717,Jan-26,Diesel,50517,L,"$94,777.55",Open Cut - North Pit
+INV-40707,Jan-26,Diesel,31461,L,54487.38,Processing Plant
+INV-40249,2025-02-14,Diesel,46083,litres,81762.52,Open Cut - North Pit
+INV-40431,04/06/2025,Diesel,30812,L,"$57,493.21",Light Vehicles
+INV-40576,04/09/2025,Diesel,102712,L,182175.75,Processing Plant
+INV-40543,Aug-25,Diesel,74877,litres,"$136,588.96",Site Services
+INV-40345,15/04/2025,Petrol (ULP),5046,L,9335.10,Light Vehicles
+INV-40559,15/09/2025,Diesel,78.69,kL,"$146,552.53",Open Cut - South Pit
+INV-40455,27/07/2025,Diesel,65950,L,117551.74,Processing Plant
+INV-40282,Mar-25,Diesel,33704,L,58922.26,Processing Plant
+INV-40309,15/03/2025,Petrol (ULP),5178,L,9579.30,Light Vehicles
+INV-40786,2026-02-12,Diesel,61658,L,"$106,539.02",Processing Plant
+INV-40539,13/08/2025,Diesel,45860,L,86761.15,Haul Fleet
+INV-40686,Jan-26,Diesel,78195,L,148502.10,Open Cut - South Pit
+INV-40274,13/03/2025,Diesel,56006,litres,107148.24,Open Cut - North Pit
+INV-40408,27/06/2025,Diesel,30482,litres,"$55,101.13",Open Cut - North Pit
+INV-40384,13/06/2025,Diesel,34795,L,"$61,455.60",Open Cut - North Pit
+INV-40357,09/05/2025,Diesel,70670,Litres,134515.51,Processing Plant
+INV-40266,Mar-25,Diesel,70138,L,134871.74,Processing Plant
+INV-40808,07/03/2026,Diesel,125320,L,225078.32,Processing Plant
+INV-40393,Jun-25,Diesel,82175,L,"$158,077.05",Open Cut - North Pit
+INV-40328,Apr-25,Diesel,53508,L,"$97,762.91",Open Cut - North Pit
+INV-40210,15/01/2025,Diesel,52.15,kL,92202.65,Open Cut - North Pit
+INV-40962,Jun-26,Diesel,71897,L,132468.35,Processing Plant
+INV-40610,05/10/2025,Diesel,73770,litres,129992.44,Open Cut - North Pit
+INV-40461,21/07/2025,Diesel,70661,L,135311.63,Haul Fleet
+INV-40338,18/04/2025,Diesel,71468,L,"$124,003.02",Haul Fleet
+INV-40236,04/01/2025,Diesel,39492,L,71229.21,Haul Fleet
+INV-40396,02/06/2025,Diesel,67729,L,121443.51,Haul Fleet
+INV-40660,09/12/2025,Diesel,47642,L,88496.29,Site Services
+INV-40558,26/09/2025,Diesel,59163,L,"$109,576.10",Site Services
+INV-40833,11/04/2026,Diesel,99362,L,"$174,742.74",Processing Plant
+INV-40605,2025-10-13,Diesel,52470,L,"$96,601.60",Open Cut - South Pit
+INV-40292,23/03/2025,Diesel,74568,L,"$136,748.68",Open Cut - North Pit
+INV-40865,05/04/2026,Diesel,41.78,kL,72207.15,Open Cut - North Pit
+INV-40967,15/06/2026,Petrol (ULP),4183,L,7738.55,Light Vehicles
+INV-40949,21/06/2026,Diesel,41459,L,"$76,580.59",Processing Plant
+INV-40948,15/06/2026,Diesel,52572,L,101307.90,Light Vehicles
+INV-40427,20/06/2025,Diesel,52874,Litres,90962.26,Processing Plant
+INV-40266,Mar-25,Diesel,70138,L,134871.74,Processing Plant
+INV-40551,15/08/2025,Petrol (ULP),4874,L,9016.90,Light Vehicles
+INV-40883,23/05/2026,Diesel,93502,L,"$180,939.01",Open Cut - South Pit
+INV-40329,19/04/2025,Diesel,73541,L,127415.02,Open Cut - South Pit
+INV-40856,25/04/2026,Diesel,76435,L,145297.54,Open Cut - North Pit
+INV-40472,2025-07-27,Diesel,51296,L,99376.91,Site Services
+INV-40848,Apr-26,Diesel,66611,L,"$126,158.32",Processing Plant
+INV-40619,05/10/2025,Diesel,92879,Litres,"$163,418.96",Processing Plant
+INV-40530,2025-08-26,Diesel,40035,Litres,"$71,081.55",Open Cut - North Pit
+INV-40480,Jul-25,Diesel,75506,L,144934.75,Open Cut - North Pit
+INV-40652,Dec-25,Diesel,117980,L,"$203,773.15",Open Cut - South Pit
+INV-40493,24/08/2025,Diesel,48.58,kL,87909.73,Open Cut - South Pit
+INV-40368,06/05/2025,Diesel,48662,litres,"$91,380.31",Processing Plant
+INV-40256,14/02/2025,Diesel,61091,litres,"$111,923.79",Open Cut - North Pit
+INV-41777,14/08/2025,Diesel,-12500,L,"$-23,375.00",Haul Fleet
+INV-40239,15/01/2025,Petrol (ULP),4093,L,7572.05,Light Vehicles
+INV-40910,May-26,Diesel,63975,litres,120272.85,Processing Plant
+INV-40942,25/06/2026,Diesel,89479,L,164855.92,Processing Plant
+INV-40300,12/03/2025,Diesel,38845,L,69192.71,Processing Plant
+INV-40298,19/03/2025,Diesel,56005,L,96416.83,Open Cut - North Pit
+INV-40265,15/02/2025,Petrol (ULP),4021,L,7438.85,Light Vehicles
+INV-40308,2025-03-17,Diesel,48571,litres,"$90,584.07",Open Cut - South Pit
+INV-40651,08/12/2025,Diesel,106746,litres,"$187,292.02",Open Cut - North Pit
+INV-40625,2025-10-17,Diesel,68418,L,"$120,453.25",Site Services
+INV-40715,26/01/2026,Diesel,29261,litres,56300.84,Haul Fleet
+INV-40400,27/06/2025,Diesel,36909,L,63798.55,Open Cut - North Pit
+INV-40672,15/12/2025,Petrol (ULP),4954,L,9164.90,Light Vehicles
+INV-40839,10/04/2026,Diesel,81162,Litres,"$156,872.01",Haul Fleet
+INV-40799,15/02/2026,Petrol (ULP),4219,L,7805.15,Light Vehicles
+INV-40724,2026-01-05,Diesel,44571,L,"$83,012.83",Site Services
+INV-40488,15/07/2025,Petrol (ULP),4852,L,8976.20,Light Vehicles
+INV-40935,13/06/2026,Diesel,60338,L,"$110,076.82",Open Cut - North Pit
+INV-40311,2025-04-10,Diesel,65067,litres,118257.65,Processing Plant
+INV-40244,19/02/2025,Diesel,46620,L,88831.10,Open Cut - North Pit
+INV-40357,09/05/2025,Diesel,70670,Litres,134515.51,Processing Plant
+INV-40287,2025-03-21,Diesel,62543,L,120355.19,Haul Fleet
+INV-40767,Feb-26,Diesel,65927,L,"$118,210.36",Haul Fleet
+INV-40349,09/05/2025,Diesel,63515,L,"$118,631.25",Open Cut - South Pit
+INV-40376,15/05/2025,Petrol (ULP),4167,L,7708.95,Light Vehicles
+INV-40440,15/06/2025,Petrol (ULP),4372,L,8088.20,Light Vehicles
+INV-40214,Jan-25,Diesel,48661,L,"$88,506.34",Haul Fleet
+INV-40678,23/01/2026,Diesel,65027,L,"$122,763.23",Open Cut - South Pit
+INV-40667,09/12/2025,Diesel,60914,L,"$115,849.42",Open Cut - North Pit

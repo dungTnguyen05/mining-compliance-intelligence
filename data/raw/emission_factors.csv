@@ -1,0 +1,4 @@
+activity,scope,unit,kg_co2e_per_unit,source
+Diesel combustion (stationary & transport),1,L,2.70,Indicative factor for this exercise
+Petrol (ULP) combustion,1,L,2.31,Indicative factor for this exercise
+Grid electricity - Queensland,2,kWh,0.71,Indicative factor for this exercise
