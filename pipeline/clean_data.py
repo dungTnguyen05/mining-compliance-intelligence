@@ -157,6 +157,18 @@ def clean_fuel_deliveries(df):
     # identical rows would otherwise double-count quantity, cost, and emissions
     df = df.drop_duplicates().reset_index(drop=True)
 
+    # data correction 3: correct negative values for INV-41777
+    # decision based on both values appearing to have incorrect negative signs
+    inv_41777_mask = df["invoice_no"] == "INV-41777"
+
+    df.loc[inv_41777_mask, "quantity"] = (
+        df.loc[inv_41777_mask, "quantity"].abs()
+    )
+
+    df.loc[inv_41777_mask, "cost_aud"] = (
+        df.loc[inv_41777_mask, "cost_aud"].abs()
+    )
+
     return df
 
 def clean_incident_register(df):
