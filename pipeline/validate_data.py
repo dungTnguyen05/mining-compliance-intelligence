@@ -523,3 +523,59 @@ def validate_suppliers(df):
             })
 
     return issues
+
+#--------------------------------------------------------------------------------
+# CROSS-DATASET VALIDATIONS
+
+# check each fuel type has a matching emission factor and unit
+# example: Diesel + L must match Diesel factor + L
+def validate_fuel_emission_factors(fuel_deliveries, emission_factors):
+    issues = []
+
+    activity_mapping = {
+        "Diesel": "Diesel combustion (stationary & transport)",
+        "Petrol (ULP)": "Petrol (ULP) combustion",
+    }
+
+    for fuel_type in fuel_deliveries["fuel_type"].dropna().unique():
+        activity = activity_mapping.get(fuel_type)
+
+        if activity is None:
+            issues.append({
+                "issue": "unmapped fuel type",
+                "fuel_type": fuel_type,
+            })
+            continue
+
+        matching_factor = emission_factors[
+            emission_factors["activity"] == activity
+        ]
+
+        if matching_factor.empty:
+            issues.append({
+                "issue": "missing emission factor",
+                "fuel_type": fuel_type,
+                "activity": activity,
+            })
+            continue
+
+        fuel_units = set(
+            fuel_deliveries.loc[
+                fuel_deliveries["fuel_type"] == fuel_type,
+                "unit",
+            ].dropna()
+        )
+
+        factor_units = set(
+            matching_factor["unit"].dropna()
+        )
+
+        if fuel_units != factor_units:
+            issues.append({
+                "issue": "fuel emission factor unit mismatch",
+                "fuel_type": fuel_type,
+                "fuel_units": sorted(fuel_units),
+                "factor_units": sorted(factor_units),
+            })
+
+    return issues
