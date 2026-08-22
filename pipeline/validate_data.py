@@ -401,8 +401,10 @@ def validate_incident_register(df):
                 df["incident_id"] == incident_id
             ]
 
+            
             issues.append({
                 "issue": "duplicate incident id",
+                "action": "flagged", # flag for review
                 "incident_id": incident_id,
                 "count": len(matching_rows),
             })
@@ -475,6 +477,7 @@ def validate_suppliers(df):
         if missing_count > 0:
             issues.append({
                 "issue": "missing values",
+                "action": "flagged", # flag for review
                 "field": column,
                 "count": int(missing_count),
             })
@@ -489,6 +492,7 @@ def validate_suppliers(df):
         for _, row in df[invalid_abn].iterrows():
             issues.append({
                 "issue": "invalid abn",
+                "action": "flagged", # flag for review
                 "supplier_name": row["supplier_name"],
                 "abn": row["abn"],
             })
@@ -516,6 +520,7 @@ def validate_suppliers(df):
 
             issues.append({
                 "issue": "duplicate abn",
+                "action": "flagged", # flag for review
                 "abn": abn,
                 "supplier_names": suppliers,
             })
