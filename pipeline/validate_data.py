@@ -336,7 +336,15 @@ def validate_incident_register(df):
 
     # check missing values
     for column in required_columns:
-        missing_count = df[column].isna().sum()
+        if df[column].dtype == "object":
+            missing_mask = (
+                df[column].isna()
+                | (df[column] == "")
+            )
+        else:
+            missing_mask = df[column].isna()
+
+        missing_count = missing_mask.sum()
 
         if missing_count > 0:
             issues.append({
@@ -382,8 +390,9 @@ def validate_incident_register(df):
         "High",
     }
 
-    invalid_severity = ~df["severity"].isin(
-        valid_severities
+    invalid_severity = (
+        df["severity"].notna()
+        & ~df["severity"].isin(valid_severities)
     )
 
     if invalid_severity.any():
@@ -391,34 +400,9 @@ def validate_incident_register(df):
             "issue": "unexpected severity",
             "values": (
                 df.loc[invalid_severity, "severity"]
-                .dropna()
                 .unique()
                 .tolist()
             ),
-        })
-
-    # check missing type codes
-    missing_type_code = (
-        df["type_code"].isna()
-        | (df["type_code"] == "")
-    )
-
-    if missing_type_code.any():
-        issues.append({
-            "issue": "missing incident type code",
-            "count": int(missing_type_code.sum()),
-        })
-
-    # check empty descriptions
-    empty_description = (
-        df["description"].isna()
-        | (df["description"] == "")
-    )
-
-    if empty_description.any():
-        issues.append({
-            "issue": "missing incident description",
-            "count": int(empty_description.sum()),
         })
 
     return issues
