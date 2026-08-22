@@ -629,3 +629,47 @@ def validate_electricity_emission_factor(electricity_meter_readings, emission_fa
         })
 
     return issues
+
+# check fuel deliveries and incidents fall within Jan 2025 to Jun 2026
+# example: a record dated Jul 2026 should be flagged
+def validate_reporting_periods(electricity_meter_readings, fuel_deliveries, incident_register):
+    issues = []
+
+    # get reporting period from electricity data
+    start_date = electricity_meter_readings["period"].min()
+    end_date = (
+        electricity_meter_readings["period"].max()
+        + pd.offsets.MonthEnd(1)
+    )
+
+    # check fuel delivery dates against reporting period
+    fuel_outside_period = (
+        fuel_deliveries["delivery_date"].notna()
+        & (
+            (fuel_deliveries["delivery_date"] < start_date)
+            | (fuel_deliveries["delivery_date"] > end_date)
+        )
+    )
+
+    if fuel_outside_period.any():
+        issues.append({
+            "issue": "fuel deliveries outside reporting period",
+            "count": int(fuel_outside_period.sum()),
+        })
+
+    # check incident dates against reporting period
+    incidents_outside_period = (
+        incident_register["incident_date"].notna()
+        & (
+            (incident_register["incident_date"] < start_date)
+            | (incident_register["incident_date"] > end_date)
+        )
+    )
+
+    if incidents_outside_period.any():
+        issues.append({
+            "issue": "incidents outside reporting period",
+            "count": int(incidents_outside_period.sum()),
+        })
+
+    return issues
