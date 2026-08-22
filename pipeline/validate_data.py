@@ -1,3 +1,5 @@
+import pandas as pd
+
 def is_valid_abn(abn):
     if pd.isna(abn):
         return False

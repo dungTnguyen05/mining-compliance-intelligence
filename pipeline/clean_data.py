@@ -1,3 +1,5 @@
+import pandas as pd
+
 def clean_electricity_meter_readings(df):
     df = df.copy()
 
