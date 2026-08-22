@@ -532,14 +532,17 @@ def validate_suppliers(df):
 def validate_fuel_emission_factors(fuel_deliveries, emission_factors):
     issues = []
 
+    # map fuel types to emission factor activities
     activity_mapping = {
         "Diesel": "Diesel combustion (stationary & transport)",
         "Petrol (ULP)": "Petrol (ULP) combustion",
     }
 
+    # check each fuel type against emission factors
     for fuel_type in fuel_deliveries["fuel_type"].dropna().unique():
         activity = activity_mapping.get(fuel_type)
 
+      # check fuel type has a known mapping
         if activity is None:
             issues.append({
                 "issue": "unmapped fuel type",
@@ -547,10 +550,12 @@ def validate_fuel_emission_factors(fuel_deliveries, emission_factors):
             })
             continue
 
+        # find matching emission factor
         matching_factor = emission_factors[
             emission_factors["activity"] == activity
         ]
 
+        # check matching emission factor exists
         if matching_factor.empty:
             issues.append({
                 "issue": "missing emission factor",
@@ -559,6 +564,7 @@ def validate_fuel_emission_factors(fuel_deliveries, emission_factors):
             })
             continue
 
+        # get units used for this fuel type
         fuel_units = set(
             fuel_deliveries.loc[
                 fuel_deliveries["fuel_type"] == fuel_type,
@@ -566,10 +572,12 @@ def validate_fuel_emission_factors(fuel_deliveries, emission_factors):
             ].dropna()
         )
 
+        # get units used by the emission factor
         factor_units = set(
             matching_factor["unit"].dropna()
         )
 
+        # check fuel and emission factor units match
         if fuel_units != factor_units:
             issues.append({
                 "issue": "fuel emission factor unit mismatch",
@@ -577,5 +585,47 @@ def validate_fuel_emission_factors(fuel_deliveries, emission_factors):
                 "fuel_units": sorted(fuel_units),
                 "factor_units": sorted(factor_units),
             })
+
+    return issues
+
+# check electricity readings have a matching grid emission factor and unit
+# example: electricity + kWh must match grid factor + kWh
+def validate_electricity_emission_factor(electricity_meter_readings, emission_factors):
+    issues = []
+
+    # find grid electricity emission factor
+    grid_factor = emission_factors[
+        emission_factors["activity"]
+        == "Grid electricity - Queensland"
+    ]
+
+    # check grid electricity emission factor exists
+    if grid_factor.empty:
+        issues.append({
+            "issue": "missing grid electricity emission factor",
+        })
+        return issues
+
+    # get electricity units
+    electricity_units = set(
+        electricity_meter_readings["unit"]
+        .dropna()
+        .unique()
+    )
+
+    # get emission factor units
+    factor_units = set(
+        grid_factor["unit"]
+        .dropna()
+        .unique()
+    )
+
+    # check electricity and emission factor units match
+    if electricity_units != factor_units:
+        issues.append({
+            "issue": "electricity emission factor unit mismatch",
+            "electricity_units": sorted(electricity_units),
+            "factor_units": sorted(factor_units),
+        })
 
     return issues
