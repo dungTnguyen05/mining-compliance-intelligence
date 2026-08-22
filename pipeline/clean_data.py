@@ -84,10 +84,24 @@ def clean_fuel_deliveries(df):
         df[column] = df[column].str.strip()
 
     # parse delivery dates with mixed formats
+    delivery_dates = df["delivery_date"].astype("string").str.strip()
+
     df["delivery_date"] = pd.to_datetime(
-        df["delivery_date"],
+        delivery_dates,
         format="mixed",
         dayfirst=True,
+        errors="coerce"
+    )
+
+    # use the first day for month-only dates, e.g. Oct-25 -> 2025-10-01
+    month_year_mask = (
+        df["delivery_date"].isna()
+        & delivery_dates.str.match(r"^[A-Za-z]{3}-\d{2}$", na=False)
+    )
+
+    df.loc[month_year_mask, "delivery_date"] = pd.to_datetime(
+        delivery_dates[month_year_mask],
+        format="%b-%y",
         errors="coerce"
     )
 
