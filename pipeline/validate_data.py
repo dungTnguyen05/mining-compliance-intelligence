@@ -270,9 +270,16 @@ def validate_fuel_deliveries(df):
     )
 
     if duplicate_rows.any():
+        duplicate_groups = (
+            df.loc[duplicate_rows]
+            .value_counts()
+            .shape[0]
+        )
+
         issues.append({
             "issue": "exact duplicate records",
-            "count": int(duplicate_rows.sum()),
+            "rows_involved": int(duplicate_rows.sum()),
+            "duplicate_groups": int(duplicate_groups),
         })
 
     # check duplicate invoice numbers
