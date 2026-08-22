@@ -127,6 +127,7 @@ def clean_fuel_deliveries(df):
 
     # convert kilolitres to litres
     kl_mask = df["unit"] == "kl"
+
     df.loc[kl_mask, "quantity"] = (
         df.loc[kl_mask, "quantity"] * 1000
     )
@@ -151,6 +152,10 @@ def clean_fuel_deliveries(df):
         df["cost_aud"],
         errors="coerce"
     )
+
+    # data correction 2: remove exact duplicate fuel delivery records
+    # identical rows would otherwise double-count quantity, cost, and emissions
+    df = df.drop_duplicates().reset_index(drop=True)
 
     return df
 
