@@ -313,7 +313,197 @@ def validate_fuel_deliveries(df):
     return issues
 
 def validate_incident_register(df):
-    ...
+    issues = []
+
+    # check required columns
+    required_columns = {
+        "incident_id",
+        "incident_date",
+        "location",
+        "type_code",
+        "severity",
+        "description",
+    }
+
+    missing_columns = required_columns - set(df.columns)
+
+    if missing_columns:
+        issues.append({
+            "issue": "missing required columns",
+            "details": sorted(missing_columns),
+        })
+        return issues
+
+    # check missing values
+    for column in required_columns:
+        missing_count = df[column].isna().sum()
+
+        if missing_count > 0:
+            issues.append({
+                "issue": "missing values",
+                "field": column,
+                "count": int(missing_count),
+            })
+
+    # check duplicate incident ids
+    duplicate_ids = df["incident_id"].duplicated(
+        keep=False
+    )
+
+    if duplicate_ids.any():
+        for incident_id in (
+            df.loc[duplicate_ids, "incident_id"]
+            .dropna()
+            .unique()
+        ):
+            matching_rows = df[
+                df["incident_id"] == incident_id
+            ]
+
+            issues.append({
+                "issue": "duplicate incident id",
+                "incident_id": incident_id,
+                "count": len(matching_rows),
+            })
+
+    # check invalid incident dates
+    invalid_dates = df["incident_date"].isna()
+
+    if invalid_dates.any():
+        issues.append({
+            "issue": "invalid incident date",
+            "count": int(invalid_dates.sum()),
+        })
+
+    # check severity values
+    valid_severities = {
+        "Low",
+        "Medium",
+        "High",
+    }
+
+    invalid_severity = ~df["severity"].isin(
+        valid_severities
+    )
+
+    if invalid_severity.any():
+        issues.append({
+            "issue": "unexpected severity",
+            "values": (
+                df.loc[invalid_severity, "severity"]
+                .dropna()
+                .unique()
+                .tolist()
+            ),
+        })
+
+    # check missing type codes
+    missing_type_code = (
+        df["type_code"].isna()
+        | (df["type_code"] == "")
+    )
+
+    if missing_type_code.any():
+        issues.append({
+            "issue": "missing incident type code",
+            "count": int(missing_type_code.sum()),
+        })
+
+    # check empty descriptions
+    empty_description = (
+        df["description"].isna()
+        | (df["description"] == "")
+    )
+
+    if empty_description.any():
+        issues.append({
+            "issue": "missing incident description",
+            "count": int(empty_description.sum()),
+        })
+
+    return issues
 
 def validate_suppliers(df):
-    ...
+    issues = []
+
+    # check required columns
+    required_columns = {
+        "supplier_name",
+        "abn",
+        "category",
+        "fy_spend_aud",
+    }
+
+    missing_columns = required_columns - set(df.columns)
+
+    if missing_columns:
+        issues.append({
+            "issue": "missing required columns",
+            "details": sorted(missing_columns),
+        })
+        return issues
+
+    # check missing values
+    for column in required_columns:
+        missing_count = df[column].isna().sum()
+
+        if missing_count > 0:
+            issues.append({
+                "issue": "missing values",
+                "field": column,
+                "count": int(missing_count),
+            })
+
+    # check abn length
+    invalid_abn = (
+        df["abn"].notna()
+        & (df["abn"].str.len() != 11)
+    )
+
+    if invalid_abn.any():
+        for _, row in df[invalid_abn].iterrows():
+            issues.append({
+                "issue": "invalid abn length",
+                "supplier_name": row["supplier_name"],
+                "abn": row["abn"],
+            })
+
+    # check duplicate abns
+    duplicate_abn = (
+        df["abn"].notna()
+        & df["abn"].duplicated(keep=False)
+    )
+
+    if duplicate_abn.any():
+        for abn in (
+            df.loc[duplicate_abn, "abn"]
+            .dropna()
+            .unique()
+        ):
+            suppliers = (
+                df.loc[
+                    df["abn"] == abn,
+                    "supplier_name"
+                ]
+                .unique()
+                .tolist()
+            )
+
+            issues.append({
+                "issue": "duplicate abn",
+                "abn": abn,
+                "supplier_names": suppliers,
+            })
+
+    # check non-positive spend
+    invalid_spend = df["fy_spend_aud"] <= 0
+
+    if invalid_spend.any():
+        for _, row in df[invalid_spend].iterrows():
+            issues.append({
+                "issue": "non-positive supplier spend",
+                "supplier_name": row["supplier_name"],
+                "fy_spend_aud": row["fy_spend_aud"],
+            })
+
+    return issues
