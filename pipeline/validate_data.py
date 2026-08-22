@@ -121,10 +121,196 @@ def validate_electricity_meter_readings(df):
     return issues
 
 def validate_emission_factors(df):
-    ...
+    issues = []
+
+    # check required columns
+    required_columns = {
+        "activity",
+        "scope",
+        "unit",
+        "kg_co2e_per_unit",
+        "source",
+    }
+
+    missing_columns = required_columns - set(df.columns)
+
+    if missing_columns:
+        issues.append({
+            "issue": "missing required columns",
+            "details": sorted(missing_columns),
+        })
+        return issues
+
+    # check missing values
+    for column in required_columns:
+        missing_count = df[column].isna().sum()
+
+        if missing_count > 0:
+            issues.append({
+                "issue": "missing values",
+                "field": column,
+                "count": int(missing_count),
+            })
+
+    # check duplicate activities
+    duplicate_activities = df["activity"].duplicated(
+        keep=False
+    )
+
+    if duplicate_activities.any():
+        issues.append({
+            "issue": "duplicate emission factor activity",
+            "activities": (
+                df.loc[duplicate_activities, "activity"]
+                .unique()
+                .tolist()
+            ),
+        })
+
+    # check valid scope values
+    invalid_scope = ~df["scope"].isin([1, 2, 3])
+
+    if invalid_scope.any():
+        issues.append({
+            "issue": "invalid emission scope",
+            "values": (
+                df.loc[invalid_scope, "scope"]
+                .dropna()
+                .unique()
+                .tolist()
+            ),
+        })
+
+    # check emission factors are positive
+    invalid_factor = df["kg_co2e_per_unit"] <= 0
+
+    if invalid_factor.any():
+        issues.append({
+            "issue": "non-positive emission factor",
+            "count": int(invalid_factor.sum()),
+        })
+
+    # check units are present
+    invalid_unit = (
+        df["unit"].isna()
+        | (df["unit"] == "")
+    )
+
+    if invalid_unit.any():
+        issues.append({
+            "issue": "missing emission factor unit",
+            "count": int(invalid_unit.sum()),
+        })
+
+    return issues
 
 def validate_fuel_deliveries(df):
-    ...
+    issues = []
+
+    # check required columns
+    required_columns = {
+        "invoice_no",
+        "delivery_date",
+        "fuel_type",
+        "quantity",
+        "unit",
+        "cost_aud",
+        "site_area",
+    }
+
+    missing_columns = required_columns - set(df.columns)
+
+    if missing_columns:
+        issues.append({
+            "issue": "missing required columns",
+            "details": sorted(missing_columns),
+        })
+        return issues
+
+    # check missing values
+    for column in required_columns:
+        missing_count = df[column].isna().sum()
+
+        if missing_count > 0:
+            issues.append({
+                "issue": "missing values",
+                "field": column,
+                "count": int(missing_count),
+            })
+
+    # check exact duplicate records
+    duplicate_rows = df.duplicated(
+        keep=False
+    )
+
+    if duplicate_rows.any():
+        issues.append({
+            "issue": "exact duplicate records",
+            "count": int(duplicate_rows.sum()),
+        })
+
+    # check duplicate invoice numbers
+    duplicate_invoices = df["invoice_no"].duplicated(
+        keep=False
+    )
+
+    if duplicate_invoices.any():
+        issues.append({
+            "issue": "duplicate invoice numbers",
+            "invoice_numbers": (
+                df.loc[duplicate_invoices, "invoice_no"]
+                .dropna()
+                .unique()
+                .tolist()
+            ),
+        })
+
+    # check non-positive quantities
+    invalid_quantity = df["quantity"] <= 0
+
+    if invalid_quantity.any():
+        for _, row in df[invalid_quantity].iterrows():
+            issues.append({
+                "issue": "non-positive fuel quantity",
+                "invoice_no": row["invoice_no"],
+                "quantity": row["quantity"],
+            })
+
+    # check unexpected fuel units after cleaning
+    invalid_units = ~df["unit"].isin(["L"])
+
+    if invalid_units.any():
+        issues.append({
+            "issue": "unexpected fuel unit",
+            "values": (
+                df.loc[invalid_units, "unit"]
+                .dropna()
+                .unique()
+                .tolist()
+            ),
+        })
+
+    # check invalid delivery dates
+    invalid_dates = df["delivery_date"].isna()
+
+    if invalid_dates.any():
+        issues.append({
+            "issue": "invalid delivery date",
+            "count": int(invalid_dates.sum()),
+        })
+
+    # check non-positive costs
+    invalid_cost = df["cost_aud"] <= 0
+
+    if invalid_cost.any():
+        for _, row in df[invalid_cost].iterrows():
+            issues.append({
+                "issue": "non-positive fuel cost",
+                "invoice_no": row["invoice_no"],
+                "cost_aud": row["cost_aud"],
+            })
+
+    return issues
 
 def validate_incident_register(df):
     ...
