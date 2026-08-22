@@ -1,3 +1,27 @@
+def is_valid_abn(abn):
+    if pd.isna(abn):
+        return False
+
+    abn = str(abn)
+
+    # check abn has exactly 11 digits
+    if len(abn) != 11 or not abn.isdigit():
+        return False
+
+    digits = [int(digit) for digit in abn]
+
+    # subtract one from the first digit
+    digits[0] -= 1
+
+    weights = [10, 1, 3, 5, 7, 9, 11, 13, 15, 17, 19]
+
+    total = sum(
+        digit * weight
+        for digit, weight in zip(digits, weights)
+    )
+
+    return total % 89 == 0
+
 def validate_electricity_meter_readings(df):
     issues = []
 
@@ -429,7 +453,15 @@ def validate_suppliers(df):
 
     # check missing values
     for column in required_columns:
-        missing_count = df[column].isna().sum()
+        if df[column].dtype == "object":
+            missing_mask = (
+                df[column].isna()
+                | (df[column] == "")
+            )
+        else:
+            missing_mask = df[column].isna()
+
+        missing_count = missing_mask.sum()
 
         if missing_count > 0:
             issues.append({
@@ -438,16 +470,16 @@ def validate_suppliers(df):
                 "count": int(missing_count),
             })
 
-    # check abn length
+    # check invalid abns
     invalid_abn = (
         df["abn"].notna()
-        & (df["abn"].str.len() != 11)
+        & ~df["abn"].apply(is_valid_abn)
     )
 
     if invalid_abn.any():
         for _, row in df[invalid_abn].iterrows():
             issues.append({
-                "issue": "invalid abn length",
+                "issue": "invalid abn",
                 "supplier_name": row["supplier_name"],
                 "abn": row["abn"],
             })
