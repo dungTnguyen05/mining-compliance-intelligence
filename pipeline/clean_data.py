@@ -29,6 +29,17 @@ def clean_electricity_meter_readings(df):
         errors="coerce"
     )
 
+    # data correction 1: MTR-07 scale adjustment
+    # decision based on the sustained 1000x drop from Oct 2025 onward
+    mtr07_scale_mask = (
+        (df["meter_id"] == "MTR-07")
+        & (df["period"] >= pd.Timestamp("2025-10-01"))
+    )
+
+    df.loc[mtr07_scale_mask, "consumption"] = (
+        df.loc[mtr07_scale_mask, "consumption"] * 1000
+    )
+
     # sort records consistently
     df = df.sort_values(
         ["meter_id", "period"]
