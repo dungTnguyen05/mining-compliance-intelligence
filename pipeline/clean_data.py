@@ -1,0 +1,331 @@
+import pandas as pd
+
+def clean_electricity_meter_readings(df):
+    df = df.copy()
+    data_quality_events = []
+
+    # normalize column names
+    df.columns = (
+        df.columns
+        .str.strip()
+        .str.lower()
+        .str.replace(r"\s+", "_", regex=True)
+    )
+
+    # trim leading and trailing whitespace from string values
+    string_columns = df.select_dtypes(include="object").columns
+    for column in string_columns:
+        df[column] = df[column].str.strip()
+
+    # parse reporting period
+    df["period"] = pd.to_datetime(
+        df["period"],
+        format="%Y-%m",
+        errors="coerce"
+    )
+
+    # ensure consumption is numeric
+    df["consumption"] = pd.to_numeric(
+        df["consumption"],
+        errors="coerce"
+    )
+
+    # data correction 1: MTR-07 scale adjustment
+    # decision based on the sustained 1000x drop from Oct 2025 onward
+    mtr07_scale_mask = (
+        (df["meter_id"] == "MTR-07")
+        & (df["period"] >= pd.Timestamp("2025-10-01"))
+    )
+
+    if mtr07_scale_mask.any():
+        affected_rows = int(mtr07_scale_mask.sum())
+
+        df.loc[mtr07_scale_mask, "consumption"] = (
+            df.loc[mtr07_scale_mask, "consumption"] * 1000
+        )
+
+        # record data quality correction
+        data_quality_events.append({
+            "dataset": "electricity_meter_readings",
+            "issue": "MTR-07 consumption scale inconsistency",
+            "action": "fixed",
+            "record_key": "MTR-07",
+            "details": {
+                "rows_fixed": affected_rows,
+                "reason": (
+                    "sustained 1000x drop from Oct 2025 onward"
+                ),
+            },
+        })
+
+    # sort records consistently
+    df = df.sort_values(
+        ["meter_id", "period"]
+    ).reset_index(drop=True)
+
+    return df, data_quality_events
+
+def clean_emission_factors(df):
+    df = df.copy()
+    data_quality_events = []
+
+    # normalize column names
+    df.columns = (
+        df.columns
+        .str.strip()
+        .str.lower()
+        .str.replace(r"\s+", "_", regex=True)
+    )
+
+    # trim leading and trailing whitespace from string values
+    string_columns = df.select_dtypes(include="object").columns
+    for column in string_columns:
+        df[column] = df[column].str.strip()
+
+    # ensure scope is numeric
+    df["scope"] = pd.to_numeric(
+        df["scope"],
+        errors="coerce"
+    )
+
+    # ensure emission factor is numeric
+    df["kg_co2e_per_unit"] = pd.to_numeric(
+        df["kg_co2e_per_unit"],
+        errors="coerce"
+    )
+
+    return df, data_quality_events
+
+def clean_fuel_deliveries(df):
+    df = df.copy()
+    data_quality_events = []
+
+    # normalize column names
+    df.columns = (
+        df.columns
+        .str.strip()
+        .str.lower()
+        .str.replace(r"\s+", "_", regex=True)
+        .str.replace(r"[()]", "", regex=True)
+    )
+
+    # trim leading and trailing whitespace from string values
+    string_columns = df.select_dtypes(include="object").columns
+    for column in string_columns:
+        df[column] = df[column].str.strip()
+
+    # parse delivery dates with mixed formats
+    delivery_dates = df["delivery_date"].astype("string").str.strip()
+
+    df["delivery_date"] = pd.to_datetime(
+        delivery_dates,
+        format="mixed",
+        dayfirst=True,
+        errors="coerce"
+    )
+
+    # use the first day for month-only dates, e.g. Oct-25 -> 2025-10-01
+    month_year_mask = (
+        df["delivery_date"].isna()
+        & delivery_dates.str.match(r"^[A-Za-z]{3}-\d{2}$", na=False)
+    )
+
+    if month_year_mask.any():
+        affected_rows = int(month_year_mask.sum())
+
+        df.loc[month_year_mask, "delivery_date"] = pd.to_datetime(
+            delivery_dates[month_year_mask],
+            format="%b-%y",
+            errors="coerce"
+        )
+
+        # record date assumption
+        data_quality_events.append({
+            "dataset": "fuel_deliveries",
+            "issue": "month-only delivery dates",
+            "action": "fixed",
+            "record_key": None,
+            "details": {
+                "rows_fixed": affected_rows,
+                "reason": (
+                    "month-only dates normalized to the first day of the reported month"
+                ),
+            },
+        })
+
+    # ensure quantity is numeric
+    df["quantity"] = pd.to_numeric(
+        df["quantity"],
+        errors="coerce"
+    )
+
+    # normalize unit labels
+    df["unit"] = df["unit"].str.lower()
+
+    # convert kilolitres to litres
+    kl_mask = df["unit"] == "kl"
+
+    if kl_mask.any():
+        affected_rows = int(kl_mask.sum())
+
+        df.loc[kl_mask, "quantity"] = (
+            df.loc[kl_mask, "quantity"] * 1000
+        )
+
+        # record unit conversion
+        data_quality_events.append({
+            "dataset": "fuel_deliveries",
+            "issue": "kilolitre fuel quantities",
+            "action": "fixed",
+            "record_key": None,
+            "details": {
+                "rows_fixed": affected_rows,
+                "reason": (
+                    "converted kilolitres to litres for consistent units"
+                ),
+            },
+        })
+
+    # standardize all litre units
+    df["unit"] = df["unit"].replace({
+        "l": "L",
+        "litres": "L",
+        "kl": "L"
+    })
+
+    # remove currency formatting
+    df["cost_aud"] = (
+        df["cost_aud"]
+        .astype(str)
+        .str.replace("$", "", regex=False)
+        .str.replace(",", "", regex=False)
+    )
+
+    # ensure cost is numeric
+    df["cost_aud"] = pd.to_numeric(
+        df["cost_aud"],
+        errors="coerce"
+    )
+
+    # data correction 2: remove exact duplicate fuel delivery records
+    # identical rows would otherwise double-count quantity, cost, and emissions
+    duplicate_count = int(df.duplicated().sum())
+
+    if duplicate_count > 0:
+        # record duplicate removal
+        data_quality_events.append({
+            "dataset": "fuel_deliveries",
+            "issue": "exact duplicate fuel delivery records",
+            "action": "fixed",
+            "record_key": None,
+            "details": {
+                "rows_removed": duplicate_count,
+                "reason": (
+                    "removed exact duplicates to prevent double-counting "
+                    "quantity, cost, and emissions"
+                ),
+            },
+        })
+
+        df = df.drop_duplicates().reset_index(drop=True)
+
+    # data correction 3: correct negative values for INV-41777
+    # decision based on both values appearing to have incorrect negative signs
+    inv_41777_mask = df["invoice_no"] == "INV-41777"
+
+    if inv_41777_mask.any():
+        affected_rows = int(inv_41777_mask.sum())
+
+        df.loc[inv_41777_mask, "quantity"] = (
+            df.loc[inv_41777_mask, "quantity"].abs()
+        )
+
+        df.loc[inv_41777_mask, "cost_aud"] = (
+            df.loc[inv_41777_mask, "cost_aud"].abs()
+        )
+
+        # record sign correction
+        data_quality_events.append({
+            "dataset": "fuel_deliveries",
+            "issue": "negative fuel quantity and cost",
+            "action": "fixed",
+            "record_key": "INV-41777",
+            "details": {
+                "rows_fixed": affected_rows,
+                "reason": (
+                    "quantity and cost appeared to have "
+                    "incorrect negative signs"
+                ),
+            },
+        })
+
+    return df, data_quality_events
+
+def clean_incident_register(df):
+    df = df.copy()
+    data_quality_events = []
+
+    # normalize column names
+    df.columns = (
+        df.columns
+        .str.strip()
+        .str.lower()
+        .str.replace(r"\s+", "_", regex=True)
+    )
+
+    # trim leading and trailing whitespace from string values
+    string_columns = df.select_dtypes(include="object").columns
+    for column in string_columns:
+        df[column] = df[column].str.strip()
+
+    # parse incident dates
+    df["incident_date"] = pd.to_datetime(
+        df["incident_date"],
+        format="%d/%m/%Y",
+        errors="coerce"
+    )
+
+    # normalize severity values
+    df["severity"] = df["severity"].replace({
+        "1": "Low",
+        "2": "Medium",
+        "3": "High"
+    })
+
+    # sort records consistently
+    df = df.sort_values(
+        ["incident_date", "incident_id"]
+    ).reset_index(drop=True)
+
+    return df, data_quality_events
+
+def clean_suppliers(df):
+    df = df.copy()
+    data_quality_events = []
+
+    # normalize column names
+    df.columns = (
+        df.columns
+        .str.strip()
+        .str.lower()
+        .str.replace(r"\s+", "_", regex=True)
+    )
+
+    # trim leading and trailing whitespace from string values
+    string_columns = df.select_dtypes(include="object").columns
+    for column in string_columns:
+        df[column] = df[column].str.strip()
+
+    # normalize abn formatting
+    df["abn"] = (
+        df["abn"]
+        .str.replace(" ", "", regex=False)
+    )
+
+    # ensure spend is numeric
+    df["fy_spend_aud"] = pd.to_numeric(
+        df["fy_spend_aud"],
+        errors="coerce"
+    )
+
+    return df, data_quality_events
