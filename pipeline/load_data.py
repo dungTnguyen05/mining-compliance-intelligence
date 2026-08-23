@@ -19,13 +19,12 @@ from validate_data import (
     validate_suppliers,
 )
 
-
 load_dotenv()
 
 DATA_DIR = Path("data/raw")
 SCHEMA_PATH = Path("database/schema.sql")
 
-
+# database connection
 def get_connection():
     return psycopg.connect(
         host=os.getenv("DB_HOST"),
@@ -35,9 +34,9 @@ def get_connection():
         password=os.getenv("DB_PASSWORD"),
     )
 
-
+# database setup
 def create_schema(connection):
-    # execute database schema
+    # create database tables if they do not already exist
     schema_sql = SCHEMA_PATH.read_text()
 
     with connection.cursor() as cursor:
@@ -45,30 +44,47 @@ def create_schema(connection):
 
     connection.commit()
 
+def clear_existing_data(connection):
+    # clear previously loaded data before inserting the current cleaned dataset
+    with connection.cursor() as cursor:
+        cursor.execute(
+            """
+            TRUNCATE TABLE
+                data_quality_issues,
+                electricity_readings,
+                electricity_meters,
+                emission_factors,
+                fuel_deliveries,
+                incidents,
+                suppliers
+            RESTART IDENTITY CASCADE
+            """
+        )
 
+    connection.commit()
+
+# load and clean datasets
 def load_cleaned_data():
     # load raw datasets
-    electricity = pd.read_csv(
-        DATA_DIR / "electricity_meter_readings.csv"
-    )
-    emission_factors = pd.read_csv(
-        DATA_DIR / "emission_factors.csv"
-    )
-    fuel_deliveries = pd.read_csv(
-        DATA_DIR / "fuel_deliveries.csv"
-    )
-    incident_register = pd.read_csv(
-        DATA_DIR / "incident_register.csv"
-    )
-    suppliers = pd.read_csv(
-        DATA_DIR / "suppliers.csv"
-    )
+    electricity = pd.read_csv(DATA_DIR/"electricity_meter_readings.csv")
+
+    emission_factors = pd.read_csv(DATA_DIR/"emission_factors.csv")
+
+    fuel_deliveries = pd.read_csv(DATA_DIR/"fuel_deliveries.csv")
+
+    incident_register = pd.read_csv(DATA_DIR/"incident_register.csv")
+
+    suppliers = pd.read_csv(DATA_DIR/"suppliers.csv")
 
     # clean datasets
     electricity = clean_electricity_meter_readings(electricity)
+
     emission_factors = clean_emission_factors(emission_factors)
+
     fuel_deliveries = clean_fuel_deliveries(fuel_deliveries)
+
     incident_register = clean_incident_register(incident_register)
+
     suppliers = clean_suppliers(suppliers)
 
     return (
@@ -79,7 +95,7 @@ def load_cleaned_data():
         suppliers,
     )
 
-
+# insert electricity data
 def insert_electricity(connection, electricity):
     # insert unique electricity meters
     meters = (
@@ -98,7 +114,6 @@ def insert_electricity(connection, electricity):
                     meter_description
                 )
                 VALUES (%s, %s)
-                ON CONFLICT (meter_id) DO NOTHING
                 """,
                 (
                     row["meter_id"],
@@ -116,7 +131,6 @@ def insert_electricity(connection, electricity):
                     consumption_kwh
                 )
                 VALUES (%s, %s, %s)
-                ON CONFLICT (meter_id, period) DO NOTHING
                 """,
                 (
                     row["meter_id"],
@@ -127,7 +141,7 @@ def insert_electricity(connection, electricity):
 
     connection.commit()
 
-
+# insert emission factors
 def insert_emission_factors(connection, emission_factors):
     with connection.cursor() as cursor:
         for _, row in emission_factors.iterrows():
@@ -141,7 +155,6 @@ def insert_emission_factors(connection, emission_factors):
                     source
                 )
                 VALUES (%s, %s, %s, %s, %s)
-                ON CONFLICT (activity) DO NOTHING
                 """,
                 (
                     row["activity"],
@@ -154,7 +167,7 @@ def insert_emission_factors(connection, emission_factors):
 
     connection.commit()
 
-
+# insert fuel deliveries
 def insert_fuel_deliveries(connection, fuel_deliveries):
     with connection.cursor() as cursor:
         for _, row in fuel_deliveries.iterrows():
@@ -182,7 +195,7 @@ def insert_fuel_deliveries(connection, fuel_deliveries):
 
     connection.commit()
 
-
+# insert incidents
 def insert_incidents(connection, incident_register):
     with connection.cursor() as cursor:
         for _, row in incident_register.iterrows():
@@ -210,7 +223,7 @@ def insert_incidents(connection, incident_register):
 
     connection.commit()
 
-
+# insert suppliers
 def insert_suppliers(connection, suppliers):
     with connection.cursor() as cursor:
         for _, row in suppliers.iterrows():
@@ -236,12 +249,8 @@ def insert_suppliers(connection, suppliers):
 
     connection.commit()
 
-
-def insert_data_quality_issues(
-    connection,
-    incident_register,
-    suppliers,
-):
+# insert data quality issues
+def insert_data_quality_issues(connection, incident_register, suppliers):
     # collect unresolved flagged issues
     issues = []
 
@@ -289,15 +298,16 @@ def insert_data_quality_issues(
 
     connection.commit()
 
-
 def main():
     connection = get_connection()
 
     try:
         print("Connected to PostgreSQL.")
 
+        # create tables if they do not already exist
         create_schema(connection)
 
+        # load and clean raw datasets
         (
             electricity,
             emission_factors,
@@ -306,23 +316,27 @@ def main():
             suppliers,
         ) = load_cleaned_data()
 
+        # replace existing loaded data with the current cleaned dataset
+        clear_existing_data(connection)
+
+        # insert cleaned datasets
         insert_electricity(connection, electricity)
+
         insert_emission_factors(connection, emission_factors)
+
         insert_fuel_deliveries(connection, fuel_deliveries)
+
         insert_incidents(connection, incident_register)
+
         insert_suppliers(connection, suppliers)
 
-        insert_data_quality_issues(
-            connection,
-            incident_register,
-            suppliers,
-        )
+        # insert unresolved data quality issues
+        insert_data_quality_issues(connection, incident_register, suppliers)
 
         print("Data loaded successfully.")
 
     finally:
         connection.close()
-
 
 if __name__ == "__main__":
     main()
