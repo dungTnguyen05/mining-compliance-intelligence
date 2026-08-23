@@ -1,5 +1,6 @@
 import { database } from "../../db.js";
 
+// PostgreSQL returns NUMERIC values as strings
 interface MonthlyEmissionsRow {
     month: string;
     scope_1_kg_co2e: string;
@@ -14,7 +15,9 @@ export interface MonthlyEmissions {
     totalKgCO2e: number;
 }
 
+// calculate monthly Scope 1 and Scope 2 emissions from cleaned activity data
 const monthlyEmissionsQuery = `
+    -- calculate Scope 1 emissions from fuel deliveries
     WITH scope_1 AS (
         SELECT
             DATE_TRUNC('month', fuel.delivery_date)::date AS month,
@@ -35,6 +38,7 @@ const monthlyEmissionsQuery = `
             AND factor.unit = 'L'
         GROUP BY month
     ),
+    -- calculate Scope 2 emissions from electricity readings
     scope_2 AS (
         SELECT
             DATE_TRUNC('month', electricity.period)::date AS month,
@@ -49,6 +53,7 @@ const monthlyEmissionsQuery = `
             AND factor.unit = 'kWh'
         GROUP BY month
     ),
+    -- include months that appear in either emissions scope
     months AS (
         SELECT month FROM scope_1
 
@@ -85,6 +90,7 @@ export async function getMonthlyEmissions(): Promise<MonthlyEmissions[]> {
             monthlyEmissionsQuery
         );
 
+    // convert database values to the API response format
     return result.rows.map((row) => ({
         month: row.month,
         scope1KgCO2e: Number(row.scope_1_kg_co2e),

@@ -4,6 +4,7 @@ import { getMonthlyEmissions } from "./emissions.repository.js";
 
 export const emissionsRouter = Router();
 
+// return monthly Scope 1 and Scope 2 emissions
 emissionsRouter.get("/monthly", async (_request, response, next) => {
     try {
         const emissions = await getMonthlyEmissions();
@@ -13,8 +14,8 @@ emissionsRouter.get("/monthly", async (_request, response, next) => {
             data: emissions
         });
     }
-
     catch (error) {
+        // send errors to the Express error handler
         next(error);
     }
 });
