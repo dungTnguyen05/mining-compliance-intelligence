@@ -2,6 +2,7 @@ import express from "express";
 
 import { emissionsRouter } from "./modules/emissions/emissions.route.js";
 import { incidentsRouter } from "./modules/incidents/incidents.route.js";
+import { dataQualityRouter } from "./modules/data-quality/data-quality.route.js";
 
 export function createApp() {
     const app = express();
@@ -25,5 +26,8 @@ export function createApp() {
     // register incident routes
     app.use("/api/incidents", incidentsRouter);
 
+    // register data quality routes
+    app.use("/api/data-quality", dataQualityRouter);
+    
     return app;
 }
