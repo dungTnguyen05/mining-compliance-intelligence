@@ -30,7 +30,8 @@ vi.mock(
                     count: 3
                 }
             ]
-        })
+        }),
+        getIncidentTrends: vi.fn()
     })
 );
 

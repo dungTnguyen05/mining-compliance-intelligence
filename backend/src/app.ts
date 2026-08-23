@@ -1,7 +1,6 @@
 import express from "express";
 
 import { emissionsRouter } from "./modules/emissions/emissions.route.js";
-
 import { incidentsRouter } from "./modules/incidents/incidents.route.js";
 
 export function createApp() {
@@ -25,6 +24,6 @@ export function createApp() {
 
     // register incident routes
     app.use("/api/incidents", incidentsRouter);
-    
+
     return app;
 }
