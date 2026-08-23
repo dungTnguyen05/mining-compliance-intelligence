@@ -2,6 +2,8 @@ import express from "express";
 
 import { emissionsRouter } from "./modules/emissions/emissions.route.js";
 
+import { incidentsRouter } from "./modules/incidents/incidents.route.js";
+
 export function createApp() {
     const app = express();
 
@@ -21,5 +23,8 @@ export function createApp() {
     // register monthly emissions routes
     app.use("/api/emissions", emissionsRouter);
 
+    // register incident routes
+    app.use("/api/incidents", incidentsRouter);
+    
     return app;
 }
