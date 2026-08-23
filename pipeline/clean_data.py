@@ -2,6 +2,7 @@ import pandas as pd
 
 def clean_electricity_meter_readings(df):
     df = df.copy()
+    data_quality_events = []
 
     # normalize column names
     df.columns = (
@@ -36,19 +37,37 @@ def clean_electricity_meter_readings(df):
         & (df["period"] >= pd.Timestamp("2025-10-01"))
     )
 
-    df.loc[mtr07_scale_mask, "consumption"] = (
-        df.loc[mtr07_scale_mask, "consumption"] * 1000
-    )
+    if mtr07_scale_mask.any():
+        affected_rows = int(mtr07_scale_mask.sum())
+
+        df.loc[mtr07_scale_mask, "consumption"] = (
+            df.loc[mtr07_scale_mask, "consumption"] * 1000
+        )
+
+        # record data quality correction
+        data_quality_events.append({
+            "dataset": "electricity_meter_readings",
+            "issue": "MTR-07 consumption scale inconsistency",
+            "action": "fixed",
+            "record_key": "MTR-07",
+            "details": {
+                "rows_fixed": affected_rows,
+                "reason": (
+                    "sustained 1000x drop from Oct 2025 onward"
+                ),
+            },
+        })
 
     # sort records consistently
     df = df.sort_values(
         ["meter_id", "period"]
     ).reset_index(drop=True)
 
-    return df
+    return df, data_quality_events
 
 def clean_emission_factors(df):
     df = df.copy()
+    data_quality_events = []
 
     # normalize column names
     df.columns = (
@@ -75,10 +94,11 @@ def clean_emission_factors(df):
         errors="coerce"
     )
 
-    return df
+    return df, data_quality_events
 
 def clean_fuel_deliveries(df):
     df = df.copy()
+    data_quality_events = []
 
     # normalize column names
     df.columns = (
@@ -110,11 +130,28 @@ def clean_fuel_deliveries(df):
         & delivery_dates.str.match(r"^[A-Za-z]{3}-\d{2}$", na=False)
     )
 
-    df.loc[month_year_mask, "delivery_date"] = pd.to_datetime(
-        delivery_dates[month_year_mask],
-        format="%b-%y",
-        errors="coerce"
-    )
+    if month_year_mask.any():
+        affected_rows = int(month_year_mask.sum())
+
+        df.loc[month_year_mask, "delivery_date"] = pd.to_datetime(
+            delivery_dates[month_year_mask],
+            format="%b-%y",
+            errors="coerce"
+        )
+
+        # record date assumption
+        data_quality_events.append({
+            "dataset": "fuel_deliveries",
+            "issue": "month-only delivery dates",
+            "action": "fixed",
+            "record_key": None,
+            "details": {
+                "rows_fixed": affected_rows,
+                "reason": (
+                    "month-only dates normalized to the first day of the reported month"
+                ),
+            },
+        })
 
     # ensure quantity is numeric
     df["quantity"] = pd.to_numeric(
@@ -128,9 +165,26 @@ def clean_fuel_deliveries(df):
     # convert kilolitres to litres
     kl_mask = df["unit"] == "kl"
 
-    df.loc[kl_mask, "quantity"] = (
-        df.loc[kl_mask, "quantity"] * 1000
-    )
+    if kl_mask.any():
+        affected_rows = int(kl_mask.sum())
+
+        df.loc[kl_mask, "quantity"] = (
+            df.loc[kl_mask, "quantity"] * 1000
+        )
+
+        # record unit conversion
+        data_quality_events.append({
+            "dataset": "fuel_deliveries",
+            "issue": "kilolitre fuel quantities",
+            "action": "fixed",
+            "record_key": None,
+            "details": {
+                "rows_fixed": affected_rows,
+                "reason": (
+                    "converted kilolitres to litres for consistent units"
+                ),
+            },
+        })
 
     # standardize all litre units
     df["unit"] = df["unit"].replace({
@@ -155,24 +209,61 @@ def clean_fuel_deliveries(df):
 
     # data correction 2: remove exact duplicate fuel delivery records
     # identical rows would otherwise double-count quantity, cost, and emissions
-    df = df.drop_duplicates().reset_index(drop=True)
+    duplicate_count = int(df.duplicated().sum())
+
+    if duplicate_count > 0:
+        # record duplicate removal
+        data_quality_events.append({
+            "dataset": "fuel_deliveries",
+            "issue": "exact duplicate fuel delivery records",
+            "action": "fixed",
+            "record_key": None,
+            "details": {
+                "rows_removed": duplicate_count,
+                "reason": (
+                    "removed exact duplicates to prevent double-counting "
+                    "quantity, cost, and emissions"
+                ),
+            },
+        })
+
+        df = df.drop_duplicates().reset_index(drop=True)
 
     # data correction 3: correct negative values for INV-41777
     # decision based on both values appearing to have incorrect negative signs
     inv_41777_mask = df["invoice_no"] == "INV-41777"
 
-    df.loc[inv_41777_mask, "quantity"] = (
-        df.loc[inv_41777_mask, "quantity"].abs()
-    )
+    if inv_41777_mask.any():
+        affected_rows = int(inv_41777_mask.sum())
 
-    df.loc[inv_41777_mask, "cost_aud"] = (
-        df.loc[inv_41777_mask, "cost_aud"].abs()
-    )
+        df.loc[inv_41777_mask, "quantity"] = (
+            df.loc[inv_41777_mask, "quantity"].abs()
+        )
 
-    return df
+        df.loc[inv_41777_mask, "cost_aud"] = (
+            df.loc[inv_41777_mask, "cost_aud"].abs()
+        )
+
+        # record sign correction
+        data_quality_events.append({
+            "dataset": "fuel_deliveries",
+            "issue": "negative fuel quantity and cost",
+            "action": "fixed",
+            "record_key": "INV-41777",
+            "details": {
+                "rows_fixed": affected_rows,
+                "reason": (
+                    "quantity and cost appeared to have "
+                    "incorrect negative signs"
+                ),
+            },
+        })
+
+    return df, data_quality_events
 
 def clean_incident_register(df):
     df = df.copy()
+    data_quality_events = []
 
     # normalize column names
     df.columns = (
@@ -206,10 +297,11 @@ def clean_incident_register(df):
         ["incident_date", "incident_id"]
     ).reset_index(drop=True)
 
-    return df
+    return df, data_quality_events
 
 def clean_suppliers(df):
     df = df.copy()
+    data_quality_events = []
 
     # normalize column names
     df.columns = (
@@ -236,4 +328,4 @@ def clean_suppliers(df):
         errors="coerce"
     )
 
-    return df
+    return df, data_quality_events

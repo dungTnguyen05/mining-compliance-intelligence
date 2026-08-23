@@ -67,25 +67,26 @@ def clear_existing_data(connection):
 def load_cleaned_data():
     # load raw datasets
     electricity = pd.read_csv(DATA_DIR/"electricity_meter_readings.csv")
-
     emission_factors = pd.read_csv(DATA_DIR/"emission_factors.csv")
-
     fuel_deliveries = pd.read_csv(DATA_DIR/"fuel_deliveries.csv")
-
     incident_register = pd.read_csv(DATA_DIR/"incident_register.csv")
-
     suppliers = pd.read_csv(DATA_DIR/"suppliers.csv")
 
     # clean datasets
-    electricity = clean_electricity_meter_readings(electricity)
+    electricity, electricity_events = clean_electricity_meter_readings(electricity)
+    emission_factors, emission_factor_events = clean_emission_factors(emission_factors)
+    fuel_deliveries, fuel_events = clean_fuel_deliveries(fuel_deliveries)
+    incident_register, incident_events = clean_incident_register(incident_register)
+    suppliers, supplier_events = clean_suppliers(suppliers)
 
-    emission_factors = clean_emission_factors(emission_factors)
-
-    fuel_deliveries = clean_fuel_deliveries(fuel_deliveries)
-
-    incident_register = clean_incident_register(incident_register)
-
-    suppliers = clean_suppliers(suppliers)
+    # merge data quality events from all datasets
+    data_quality_events = (
+        electricity_events
+        + emission_factor_events
+        + fuel_events
+        + incident_events
+        + supplier_events
+    )
 
     return (
         electricity,
@@ -93,6 +94,7 @@ def load_cleaned_data():
         fuel_deliveries,
         incident_register,
         suppliers,
+        data_quality_events,
     )
 
 # insert electricity data
@@ -250,9 +252,9 @@ def insert_suppliers(connection, suppliers):
     connection.commit()
 
 # insert data quality issues
-def insert_data_quality_issues(connection, incident_register, suppliers):
-    # collect unresolved flagged issues
-    issues = []
+def insert_data_quality_issues(connection, incident_register, suppliers, data_quality_events):
+    # merge fixed corrections with unresolved flagged issues
+    issues = data_quality_events.copy()
 
     for issue in validate_incident_register(incident_register):
         if issue.get("action") == "flagged":
@@ -271,7 +273,8 @@ def insert_data_quality_issues(connection, incident_register, suppliers):
     with connection.cursor() as cursor:
         for issue in issues:
             record_key = (
-                issue.get("incident_id")
+                issue.get("record_key")
+                or issue.get("incident_id")
                 or issue.get("abn")
                 or issue.get("supplier_name")
             )
@@ -314,6 +317,7 @@ def main():
             fuel_deliveries,
             incident_register,
             suppliers,
+            data_quality_events,
         ) = load_cleaned_data()
 
         # replace existing loaded data with the current cleaned dataset
@@ -321,17 +325,13 @@ def main():
 
         # insert cleaned datasets
         insert_electricity(connection, electricity)
-
         insert_emission_factors(connection, emission_factors)
-
         insert_fuel_deliveries(connection, fuel_deliveries)
-
         insert_incidents(connection, incident_register)
-
         insert_suppliers(connection, suppliers)
 
-        # insert unresolved data quality issues
-        insert_data_quality_issues(connection, incident_register, suppliers)
+        # insert fixed and unresolved data quality issues
+        insert_data_quality_issues(connection, incident_register, suppliers, data_quality_events)
 
         print("Data loaded successfully.")
 
