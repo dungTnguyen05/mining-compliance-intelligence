@@ -163,6 +163,27 @@ class FindingValidationTests(unittest.TestCase):
         ):
             analysis.validate_finding(finding, make_incident())
 
+    def test_rejects_job_demands_inferred_from_anxiety_alone(self):
+        finding = make_finding()
+        finding["psychosocial_types"].append("job_demands")
+
+        with self.assertRaisesRegex(
+            analysis.ModelResponseError,
+            "job demands require explicit evidence",
+        ):
+            analysis.validate_finding(finding, make_incident())
+
+    def test_accepts_job_demands_with_explicit_workload_evidence(self):
+        incident = make_incident()
+        incident["description"] = (
+            f"{incident['description']} The operator also reported excessive "
+            "workload caused by understaffing."
+        )
+        finding = make_finding()
+        finding["psychosocial_types"].append("job_demands")
+
+        analysis.validate_finding(finding, incident)
+
 class RetryTests(unittest.TestCase):
     def test_retries_rejected_model_finding(self):
         finding = make_finding()

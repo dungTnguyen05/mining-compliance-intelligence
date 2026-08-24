@@ -38,6 +38,23 @@ SOURCE_FIELDS = (
     "description",
 )
 
+JOB_DEMAND_INDICATORS = (
+    "workload",
+    "work load",
+    "work pace",
+    "time pressure",
+    "deadline",
+    "overtime",
+    "long hours",
+    "understaffed",
+    "understaffing",
+    "staff shortage",
+    "staffing shortage",
+    "emotional demands",
+    "task demands",
+    "excessive demands",
+)
+
 SYSTEM_PROMPT = f"""
 You review mining safety and environmental incident records.
 
@@ -52,6 +69,12 @@ Choose the event mechanism only from:
 
 Choose psychosocial types only from:
 {", ".join(PSYCHOSOCIAL_TYPES)}
+
+Select the smallest set of psychosocial types directly supported by explicit
+text in the description. Do not infer a hazard source from feelings or symptoms
+alone. In particular, anxiety or stress alone does not establish job_demands.
+Select job_demands only when the description explicitly reports workload, work
+pace, working hours, staffing, deadlines, emotional demands, or task demands.
 
 Use the description as the evidence source. The recorded type code and severity
 are context only and may be incomplete or incorrect.
@@ -290,7 +313,10 @@ def validate_severity(
                 "an inconsistent finding must suggest a different severity"
             )
 
-def validate_psychosocial_finding(finding: Mapping[str, Any]) -> None:
+def validate_psychosocial_finding(
+    finding: Mapping[str, Any],
+    description: str,
+) -> None:
     """validate psychosocial flag, domains, and types together"""
     psychosocial_hazard = finding["psychosocial_hazard"]
     psychosocial_types = finding["psychosocial_types"]
@@ -309,6 +335,18 @@ def validate_psychosocial_finding(finding: Mapping[str, Any]) -> None:
             raise ModelResponseError(
                 "a psychosocial finding must include a psychosocial type"
             )
+
+        if "job_demands" in psychosocial_types:
+            normalized_description = description.casefold()
+            has_job_demand_evidence = any(
+                indicator in normalized_description
+                for indicator in JOB_DEMAND_INDICATORS
+            )
+
+            if not has_job_demand_evidence:
+                raise ModelResponseError(
+                    "job demands require explicit evidence in the description"
+                )
 
     if not psychosocial_hazard:
         if psychosocial_types:
@@ -329,7 +367,7 @@ def validate_finding(
     validate_taxonomy(finding)
     validate_evidence(finding, incident["description"])
     validate_severity(finding, incident["severity"])
-    validate_psychosocial_finding(finding)
+    validate_psychosocial_finding(finding, incident["description"])
 
 def create_gateway_client(api_key: str, base_url: str) -> Any:
     """create an OpenAI-compatible gateway client"""
