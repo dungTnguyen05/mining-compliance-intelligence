@@ -135,13 +135,20 @@ def prepare_finding_parameters(
             f"AI finding {position} is missing provenance fields: {missing}"
         )
 
+    attempts = int(provenance["attempts"])
+
+    if attempts < 0:
+        raise IncidentAnalysisError(
+            f"AI finding {position} cannot have negative attempts"
+        )
+
     return {
         "source_record_hash": source["record_hash"],
         **finding,
         "response_id": provenance.get("response_id"),
         "model": provenance["model"],
         "processed_at": provenance["processed_at"],
-        "attempts": int(provenance["attempts"]),
+        "attempts": attempts,
     }
 
 
