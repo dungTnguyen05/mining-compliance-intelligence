@@ -12,8 +12,13 @@ interface DataResponse<T> {
   data: T
 }
 
+const apiBaseUrl = (import.meta.env.VITE_API_BASE_URL ?? '').replace(
+  /\/+$/,
+  '',
+)
+
 async function fetchJson<T>(path: string): Promise<T> {
-  const response = await fetch(path, {
+  const response = await fetch(`${apiBaseUrl}${path}`, {
     headers: {
       Accept: 'application/json',
     },
