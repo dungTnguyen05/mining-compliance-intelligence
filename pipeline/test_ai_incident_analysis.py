@@ -92,19 +92,22 @@ class IncidentLoadingTests(unittest.TestCase):
             model_input,
             {
                 "recorded_type_code": "OTH",
-                "recorded_severity": "Low",
                 "description": make_incident()["description"],
             },
         )
 
 class PromptTests(unittest.TestCase):
-    def test_defines_severity_field_relationships(self):
+    def test_deanchors_severity_and_requires_direct_domain_evidence(self):
         self.assertIn(
-            "suggested_severity must equal the\n  recorded severity",
+            "recorded severity is intentionally\nnot supplied",
             analysis.SYSTEM_PROMPT,
         )
         self.assertIn(
-            "suggested_severity must\n  differ from the recorded severity",
+            "Do not add a secondary domain",
+            analysis.SYSTEM_PROMPT,
+        )
+        self.assertIn(
+            "set severity_consistency to consistent as a placeholder",
             analysis.SYSTEM_PROMPT,
         )
 
@@ -204,10 +207,128 @@ class FindingValidationTests(unittest.TestCase):
             "outage."
         )
         finding = make_finding()
-        finding["psychosocial_types"] = ["job_demands"]
+        finding["psychosocial_types"] = [
+            "job_demands",
+            "work_related_fatigue",
+        ]
         finding["category_evidence_quote"] = "fatigue after extended shifts"
 
         analysis.validate_finding(finding, incident)
+
+    def test_derives_severity_consistency_after_model_response(self):
+        finding = make_finding()
+        finding["suggested_severity"] = "Low"
+        finding["severity_evidence_quote"] = "feeling anxious before shift"
+
+        analysis.derive_severity_consistency(finding, "Medium")
+
+        self.assertEqual(
+            finding["severity_consistency"],
+            "appears_inconsistent",
+        )
+
+    def test_rejects_dropped_object_as_slips_trips_falls(self):
+        incident = make_incident()
+        incident["description"] = (
+            "Dropped object (hand tool) from CHPP walkway, exclusion zone in "
+            "place, no injury."
+        )
+        incident["severity"] = "Medium"
+        finding = make_finding()
+        finding.update(
+            {
+                "primary_hazard_domain": "plant_equipment",
+                "secondary_hazard_domains": ["slips_trips_falls"],
+                "event_mechanism": "dropped_object",
+                "psychosocial_hazard": False,
+                "psychosocial_types": [],
+                "severity_consistency": "consistent",
+                "suggested_severity": "Medium",
+                "category_evidence_quote": incident["description"],
+                "severity_evidence_quote": incident["description"],
+            }
+        )
+
+        with self.assertRaisesRegex(
+            analysis.ModelResponseError,
+            "slips_trips_falls requires explicit evidence",
+        ):
+            analysis.validate_finding(finding, incident)
+
+    def test_rejects_location_as_plant_equipment_evidence(self):
+        incident = make_incident()
+        incident["description"] = (
+            "Operator slipped on wet stairs at wash plant, grazed elbow, "
+            "first aid administered."
+        )
+        incident["severity"] = "Medium"
+        finding = make_finding()
+        finding.update(
+            {
+                "primary_hazard_domain": "slips_trips_falls",
+                "secondary_hazard_domains": ["plant_equipment"],
+                "event_mechanism": "slip_or_trip",
+                "psychosocial_hazard": False,
+                "psychosocial_types": [],
+                "severity_consistency": "consistent",
+                "suggested_severity": "Medium",
+                "category_evidence_quote": (
+                    "Operator slipped on wet stairs at wash plant"
+                ),
+                "severity_evidence_quote": (
+                    "grazed elbow, first aid administered"
+                ),
+            }
+        )
+
+        with self.assertRaisesRegex(
+            analysis.ModelResponseError,
+            "plant_equipment requires explicit evidence",
+        ):
+            analysis.validate_finding(finding, incident)
+
+    def test_rejects_inferred_role_clarity(self):
+        incident = make_incident()
+        incident["description"] = (
+            "Crew member reported exclusion from toolbox talks and rostering "
+            "decisions after raising a safety concern, describes ongoing stress "
+            "and poor sleep."
+        )
+        finding = make_finding()
+        finding["psychosocial_types"] = [
+            "poor_organizational_justice",
+            "lack_of_role_clarity",
+        ]
+        finding["category_evidence_quote"] = (
+            "exclusion from toolbox talks and rostering decisions"
+        )
+
+        with self.assertRaisesRegex(
+            analysis.ModelResponseError,
+            "lack_of_role_clarity requires explicit evidence",
+        ):
+            analysis.validate_finding(finding, incident)
+
+    def test_rejects_fatigue_inferred_from_overtime(self):
+        incident = make_incident()
+        incident["description"] = (
+            "Worker disclosed feeling overwhelmed by sustained overtime and "
+            "understaffing on night shift, requested confidential support."
+        )
+        finding = make_finding()
+        finding["psychosocial_types"] = [
+            "job_demands",
+            "work_related_fatigue",
+        ]
+        finding["category_evidence_quote"] = (
+            "feeling overwhelmed by sustained overtime and understaffing"
+        )
+
+        with self.assertRaisesRegex(
+            analysis.ModelResponseError,
+            "work_related_fatigue requires explicit evidence",
+        ):
+            analysis.validate_finding(finding, incident)
 
 class RetryTests(unittest.TestCase):
     def test_retries_rejected_model_finding(self):
@@ -260,18 +381,20 @@ class BatchResumeTests(unittest.TestCase):
     ) -> dict:
         incident = deepcopy(make_incident())
         incident["incident_id"] = incident_id
+        incident["description"] = (
+            "{} {}".format(incident["description"], incident_id)
+        )
         incident["source_record_hash"] = record_hash
 
         return incident
 
     def make_result(self, incident: dict) -> dict:
         return {
-            "source": {
-                "record_hash": incident["source_record_hash"],
-            },
+            "source": analysis.source_metadata(incident),
             "finding": make_finding(),
             "provenance": {
                 "model": "test-model",
+                "analysis_version": analysis.ANALYSIS_VERSION,
             },
         }
 
@@ -328,6 +451,92 @@ class BatchResumeTests(unittest.TestCase):
             self.assertEqual(failed, 0)
             self.assertEqual(len(analysis.read_jsonl(output_path)), 2)
             self.assertEqual(analysis.read_jsonl(failures_path), [])
+
+    def test_marks_conflicting_duplicate_severities_as_stale(self):
+        first = self.make_distinct_incident("INC-1", "a" * 64)
+        second = self.make_distinct_incident("INC-2", "b" * 64)
+        second["description"] = first["description"]
+        second["severity"] = "Medium"
+        first_result = self.make_result(first)
+        second_result = self.make_result(second)
+
+        for result, severity in (
+            (first_result, "Low"),
+            (second_result, "Medium"),
+        ):
+            result["finding"]["suggested_severity"] = severity
+            result["finding"]["severity_consistency"] = "consistent"
+            result["finding"]["severity_evidence_quote"] = (
+                "feeling anxious before shift"
+            )
+
+        stale_hashes = analysis.find_stale_finding_hashes(
+            {
+                first["source_record_hash"]: first_result,
+                second["source_record_hash"]: second_result,
+            },
+            {
+                first["source_record_hash"]: first,
+                second["source_record_hash"]: second,
+            },
+        )
+
+        self.assertEqual(
+            stale_hashes,
+            {first["source_record_hash"], second["source_record_hash"]},
+        )
+
+    def test_reuses_one_assessment_for_identical_descriptions(self):
+        first = self.make_distinct_incident("INC-1", "a" * 64)
+        second = self.make_distinct_incident("INC-2", "b" * 64)
+        second["description"] = first["description"]
+        second["severity"] = "Medium"
+        first_result = self.make_result(first)
+        first_result["finding"]["suggested_severity"] = "Low"
+        first_result["finding"]["severity_consistency"] = "consistent"
+        first_result["finding"]["severity_evidence_quote"] = (
+            "feeling anxious before shift"
+        )
+
+        with TemporaryDirectory() as directory:
+            output_path = Path(directory) / "findings.jsonl"
+            failures_path = Path(directory) / "failures.jsonl"
+
+            with patch.object(
+                analysis,
+                "analyze_incident",
+                return_value=first_result,
+            ) as analyze:
+                succeeded, failed = analysis.analyze_all(
+                    object(),
+                    [first, second],
+                    "test-model",
+                    max_attempts=1,
+                    input_path=analysis.DEFAULT_INPUT_PATH,
+                    output_path=output_path,
+                    failures_path=failures_path,
+                    request_delay=0,
+                    sleep=lambda _: None,
+                )
+
+            saved_by_hash = {
+                record["source"]["record_hash"]: record
+                for record in analysis.read_jsonl(output_path)
+            }
+            reused = saved_by_hash[second["source_record_hash"]]
+
+            self.assertEqual(analyze.call_count, 1)
+            self.assertEqual(succeeded, 2)
+            self.assertEqual(failed, 0)
+            self.assertEqual(
+                reused["finding"]["suggested_severity"],
+                "Low",
+            )
+            self.assertEqual(
+                reused["finding"]["severity_consistency"],
+                "appears_inconsistent",
+            )
+            self.assertEqual(reused["provenance"]["attempts"], 0)
 
     def test_checkpoints_rate_limit_failure_and_pauses_batch(self):
         first = self.make_distinct_incident("INC-1", "a" * 64)

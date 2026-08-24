@@ -7,6 +7,8 @@ import json
 import os
 import sys
 import time
+from collections import defaultdict
+from copy import deepcopy
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Callable, Mapping, Sequence
@@ -34,6 +36,61 @@ DEFAULT_OUTPUT_PATH = PROJECT_ROOT/"data"/"processed"/"incident_ai_findings.json
 DEFAULT_FAILURES_PATH = PROJECT_ROOT/"data"/"processed"/"incident_ai_failures.jsonl"
 DEFAULT_TEST_INCIDENT_ID = "INC-2025-127"
 SOURCE_FIELDS = INCIDENT_SOURCE_FIELDS
+ANALYSIS_VERSION = 2
+
+DOMAIN_EVIDENCE_INDICATORS = {
+    "electrical": (
+        "electrical",
+        "power",
+        "grid",
+        "substation",
+        "voltage",
+        "cable",
+        "generator",
+    ),
+    "plant_equipment": (
+        "equipment",
+        "machine",
+        "crusher",
+        "fogger",
+        "pump",
+        "excavator",
+        "dozer",
+        "belt",
+        "generator",
+        "tool",
+        "tyre",
+        "hose",
+    ),
+    "slips_trips_falls": (
+        "slip",
+        "trip",
+        "fall",
+        "fell",
+        "stumble",
+        "ladder",
+    ),
+}
+
+PSYCHOSOCIAL_EVIDENCE_INDICATORS = {
+    "lack_of_role_clarity": (
+        "unclear role",
+        "role ambiguity",
+        "unclear responsibilities",
+        "responsibilities unclear",
+        "unclear duties",
+        "duties unclear",
+        "expectations unclear",
+    ),
+    "work_related_fatigue": (
+        "fatigue",
+        "fatigued",
+        "tired",
+        "exhausted",
+        "poor sleep",
+        "sleep deprivation",
+    ),
+}
 
 JOB_DEMAND_INDICATORS = (
     "workload",
@@ -68,14 +125,23 @@ Choose the event mechanism only from:
 Choose psychosocial types only from:
 {", ".join(PSYCHOSOCIAL_TYPES)}
 
-Select the smallest set of psychosocial types directly supported by explicit
-text in the description. Do not infer a hazard source from feelings or symptoms
-alone. In particular, anxiety or stress alone does not establish job_demands.
-Select job_demands only when the description explicitly reports workload, work
-pace, working hours, staffing, deadlines, emotional demands, or task demands.
+Select the smallest set of hazard domains and psychosocial types directly
+supported by explicit text in the description. Do not add a secondary domain
+only because equipment, electricity, or a location is mentioned; the text must
+describe an additional hazard. A walkway alone does not establish a
+slips_trips_falls hazard.
 
-Use the description as the evidence source. The recorded type code and severity
-are context only and may be incomplete or incorrect.
+Do not infer a psychosocial hazard source from feelings or symptoms alone. In
+particular, anxiety or stress alone does not establish job_demands. Select
+job_demands only when the description explicitly reports workload, work pace,
+working hours, staffing, deadlines, emotional demands, or task demands. Select
+work_related_fatigue only for explicit fatigue, tiredness, exhaustion, or sleep
+evidence. Select lack_of_role_clarity only for explicit uncertainty about
+roles, responsibilities, duties, or expectations.
+
+Use the description as the evidence source. The recorded type code is context
+only and may be incomplete or incorrect. The recorded severity is intentionally
+not supplied to the model so the suggested severity is assessed independently.
 
 Identify psychosocial hazards regardless of the recorded type code. When one is
 present, include psychosocial as a primary or secondary hazard domain and select
@@ -88,11 +154,11 @@ Use this severity guide:
 - High: fracture, hospitalization, surgery, lost-time injury, serious injury,
   major disruption, or a clearly described high-potential event.
 
-Keep the severity fields internally consistent:
-- When severity_consistency is consistent, suggested_severity must equal the
-  recorded severity.
-- When severity_consistency is appears_inconsistent, suggested_severity must
-  differ from the recorded severity.
+Assess suggested_severity only from the description. When a severity can be
+assessed, set severity_consistency to consistent as a placeholder. Local code
+will compare suggested_severity with the recorded severity and replace the
+placeholder. Do not discuss agreement with the recorded severity in the
+explanation.
 
 Do not invent injuries, causes, diagnoses, intent, consequences, or legal
 conclusions.
@@ -167,7 +233,6 @@ def build_model_input(incident: Mapping[str, Any]) -> dict[str, str]:
     """select only fields needed for model analysis"""
     return {
         "recorded_type_code": incident["type_code"],
-        "recorded_severity": incident["severity"],
         "description": incident["description"],
     }
 
@@ -212,6 +277,26 @@ def parse_finding(content: str) -> dict[str, Any]:
 
     return finding
 
+def has_explicit_evidence(text: str, indicators: Sequence[str]) -> bool:
+    """return whether text contains one allowed grounding indicator"""
+    normalized_text = text.casefold()
+
+    return any(indicator in normalized_text for indicator in indicators)
+
+def derive_severity_consistency(
+    finding: dict[str, Any],
+    recorded_severity: str,
+) -> None:
+    """derive comparison status without exposing recorded severity to the model"""
+    suggested_severity = finding["suggested_severity"]
+
+    if suggested_severity == "Not assessed":
+        finding["severity_consistency"] = "insufficient_context"
+    elif suggested_severity == recorded_severity:
+        finding["severity_consistency"] = "consistent"
+    else:
+        finding["severity_consistency"] = "appears_inconsistent"
+
 def validate_taxonomy(finding: Mapping[str, Any]) -> None:
     """validate relationships not expressed by the JSON schema"""
     primary_domain = finding["primary_hazard_domain"]
@@ -224,6 +309,23 @@ def validate_taxonomy(finding: Mapping[str, Any]) -> None:
 
     if len(secondary_domains) != len(set(secondary_domains)):
         raise ModelResponseError("secondary hazard domains must be unique")
+
+def validate_domain_evidence(finding: Mapping[str, Any]) -> None:
+    """require supported domains to appear in the category evidence quote"""
+    category_quote = finding["category_evidence_quote"]
+    domains = [
+        finding["primary_hazard_domain"],
+        *finding["secondary_hazard_domains"],
+    ]
+
+    for domain, indicators in DOMAIN_EVIDENCE_INDICATORS.items():
+        if domain in domains and not has_explicit_evidence(
+            category_quote,
+            indicators,
+        ):
+            raise ModelResponseError(
+                f"{domain} requires explicit evidence in the category quote"
+            )
 
 def validate_evidence(
     finding: Mapping[str, Any],
@@ -328,6 +430,18 @@ def validate_psychosocial_finding(
                     "job demands require explicit evidence in the description"
                 )
 
+        for psychosocial_type, indicators in (
+            PSYCHOSOCIAL_EVIDENCE_INDICATORS.items()
+        ):
+            if (
+                psychosocial_type in psychosocial_types
+                and not has_explicit_evidence(description, indicators)
+            ):
+                raise ModelResponseError(
+                    f"{psychosocial_type} requires explicit evidence in the "
+                    "description"
+                )
+
     if not psychosocial_hazard:
         if psychosocial_types:
             raise ModelResponseError(
@@ -345,6 +459,7 @@ def validate_finding(
 ) -> None:
     """run all local grounding and consistency checks"""
     validate_taxonomy(finding)
+    validate_domain_evidence(finding)
     validate_evidence(finding, incident["description"])
     validate_severity(finding, incident["severity"])
     validate_psychosocial_finding(finding, incident["description"])
@@ -403,12 +518,14 @@ def request_finding(
         raise ModelResponseError("gateway response contained no finding")
 
     finding = parse_finding(message.content)
+    derive_severity_consistency(finding, incident["severity"])
     validate_finding(finding, incident)
 
     provenance = {
         "response_id": getattr(completion, "id", None),
         "model": getattr(completion, "model", None) or model,
         "processed_at": datetime.now(timezone.utc).isoformat(),
+        "analysis_version": ANALYSIS_VERSION,
     }
 
     return finding, provenance
@@ -606,6 +723,72 @@ def index_artifacts_by_record_hash(
 
     return indexed_records
 
+def find_stale_finding_hashes(
+    findings_by_hash: Mapping[str, Mapping[str, Any]],
+    incidents_by_hash: Mapping[str, Mapping[str, Any]],
+) -> set[str]:
+    """find saved findings that fail current or cross-record validation"""
+    stale_hashes: set[str] = set()
+    findings_by_description: defaultdict[
+        str,
+        list[tuple[str, str]],
+    ] = defaultdict(list)
+
+    for record_hash, record in findings_by_hash.items():
+        incident = incidents_by_hash.get(record_hash)
+
+        if incident is None:
+            stale_hashes.add(record_hash)
+            continue
+
+        try:
+            validate_finding(record["finding"], incident)
+        except (KeyError, ModelResponseError):
+            stale_hashes.add(record_hash)
+
+        findings_by_description[incident["description"]].append(
+            (record_hash, record["finding"]["suggested_severity"])
+        )
+
+    for grouped_findings in findings_by_description.values():
+        suggested_severities = {
+            suggested_severity
+            for _, suggested_severity in grouped_findings
+        }
+
+        if len(suggested_severities) > 1:
+            stale_hashes.update(
+                record_hash for record_hash, _ in grouped_findings
+            )
+
+    return stale_hashes
+
+def reuse_finding_result(
+    reusable_result: Mapping[str, Any],
+    incident: Mapping[str, Any],
+    model: str,
+    input_path: Path,
+) -> dict[str, Any]:
+    """reuse one current finding for an identical incident description"""
+    finding = deepcopy(reusable_result["finding"])
+    derive_severity_consistency(finding, incident["severity"])
+    validate_finding(finding, incident)
+
+    original_provenance = reusable_result["provenance"]
+
+    return {
+        "source": source_metadata(incident, input_path),
+        "finding": finding,
+        "provenance": {
+            "response_id": original_provenance.get("response_id"),
+            "model": original_provenance.get("model") or model,
+            "processed_at": datetime.now(timezone.utc).isoformat(),
+            "attempts": 0,
+            "analysis_version": ANALYSIS_VERSION,
+            "reused_from_record_hash": reusable_result["source"]["record_hash"],
+        },
+    }
+
 def analyze_all(
     client: Any,
     incidents: Sequence[Mapping[str, Any]],
@@ -634,6 +817,33 @@ def analyze_all(
     for completed_hash in findings_by_hash:
         failures_by_hash.pop(completed_hash, None)
 
+    incidents_by_hash = {
+        incident["source_record_hash"]: incident
+        for incident in incidents
+    }
+    stale_hashes = find_stale_finding_hashes(
+        findings_by_hash,
+        incidents_by_hash,
+    )
+
+    for stale_hash in stale_hashes:
+        findings_by_hash.pop(stale_hash, None)
+
+    if stale_hashes:
+        print(
+            f"reprocessing {len(stale_hashes)} findings that fail current "
+            "validation",
+            file=sys.stderr,
+        )
+
+    reusable_by_description: dict[str, dict[str, Any]] = {}
+    for saved_result in findings_by_hash.values():
+        provenance = saved_result.get("provenance", {})
+
+        if provenance.get("analysis_version") == ANALYSIS_VERSION:
+            description = saved_result["source"]["description"]
+            reusable_by_description.setdefault(description, saved_result)
+
     pending_incidents = [
         incident
         for incident in incidents
@@ -659,14 +869,32 @@ def analyze_all(
         )
 
         try:
-            result = analyze_incident(
-                client,
-                incident,
-                model,
-                max_attempts=max_attempts,
-                sleep=sleep,
-                input_path=input_path,
+            reusable_result = reusable_by_description.get(
+                incident["description"]
             )
+
+            if reusable_result is not None:
+                result = reuse_finding_result(
+                    reusable_result,
+                    incident,
+                    model,
+                    input_path,
+                )
+                print(
+                    f"{incident_id}: reused assessment for identical description",
+                    file=sys.stderr,
+                )
+            else:
+                result = analyze_incident(
+                    client,
+                    incident,
+                    model,
+                    max_attempts=max_attempts,
+                    sleep=sleep,
+                    input_path=input_path,
+                )
+                reusable_by_description[incident["description"]] = result
+
             findings_by_hash[record_hash] = result
             failures_by_hash.pop(record_hash, None)
         except Exception as error:
