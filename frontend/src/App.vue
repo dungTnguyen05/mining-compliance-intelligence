@@ -15,10 +15,20 @@ const loading = ref(true)
 const errorMessage = ref('')
 const lastUpdated = ref<Date | null>(null)
 
-type SectionId = 'overview' | 'operations' | 'attention'
+const SECTION_IDS = [
+  'site-overview',
+  'performance',
+  'review-queue',
+] as const
+type SectionId = typeof SECTION_IDS[number]
+const LEGACY_SECTION_IDS: Record<string, SectionId> = {
+  '#overview': 'site-overview',
+  '#operations': 'performance',
+  '#attention': 'review-queue',
+}
 
-const activeSection = ref<SectionId>('overview')
-let sectionObserver: IntersectionObserver | null = null
+const activeSection = ref<SectionId>('site-overview')
+let scrollFrame: number | null = null
 
 // derive decision-ready metrics from the API responses
 const totalEmissionsTonnes = computed(() => {
@@ -63,6 +73,57 @@ const highSeverityCount = computed(() =>
     (item) => item.severity === 'High',
   )?.count ?? 0,
 )
+
+const incompleteEmissionsMonths = computed(() =>
+  dashboard.value?.emissions
+    .filter((item) => item.missingScopes.length > 0)
+    .map((item) => item.month) ?? [],
+)
+
+const powerDisruptionInsight = computed(() => {
+  if (!dashboard.value) {
+    return null
+  }
+
+  const february = dashboard.value.emissions.find(
+    (item) => item.month === '2026-02',
+  )
+  const march = dashboard.value.emissions.find(
+    (item) => item.month === '2026-03',
+  )
+  const outageFinding = dashboard.value.aiFindings.find(
+    (finding) => finding.incidentId === 'INC-2026-131',
+  )
+  const fatigueFinding = dashboard.value.aiFindings.find(
+    (finding) => finding.incidentId === 'INC-2026-134',
+  )
+
+  if (
+    february?.scope1KgCO2e == null ||
+    february.scope2KgCO2e == null ||
+    march?.scope1KgCO2e == null ||
+    march.scope2KgCO2e == null ||
+    !outageFinding ||
+    !fatigueFinding
+  ) {
+    return null
+  }
+
+  return {
+    scope1Increase: Math.round(
+      ((march.scope1KgCO2e - february.scope1KgCO2e) /
+        february.scope1KgCO2e) *
+        100,
+    ),
+    scope2Decrease: Math.round(
+      ((february.scope2KgCO2e - march.scope2KgCO2e) /
+        february.scope2KgCO2e) *
+        100,
+    ),
+    outageIncidentId: outageFinding.incidentId,
+    fatigueIncidentId: fatigueFinding.incidentId,
+  }
+})
 
 // surface findings that need human attention first
 const attentionFindings = computed(() => {
@@ -199,37 +260,86 @@ function qualityIssueDescription(issue: DataQualityIssue): string {
   return formatLabel(issue.issueType)
 }
 
+function updateActiveSection(): void {
+  const sections = SECTION_IDS
+    .map((sectionId) => document.getElementById(sectionId))
+    .filter((section): section is HTMLElement => section !== null)
+
+  if (!sections.length) {
+    return
+  }
+
+  if (
+    window.innerHeight + window.scrollY >=
+    document.documentElement.scrollHeight - 2
+  ) {
+    activeSection.value = SECTION_IDS[SECTION_IDS.length - 1]
+    return
+  }
+
+  const headerOffset = 112
+  let currentSection = sections[0].id as SectionId
+
+  for (const section of sections) {
+    if (section.getBoundingClientRect().top <= headerOffset) {
+      currentSection = section.id as SectionId
+    }
+  }
+
+  activeSection.value = currentSection
+}
+
+function scheduleNavigationUpdate(): void {
+  if (scrollFrame !== null) {
+    return
+  }
+
+  scrollFrame = window.requestAnimationFrame(() => {
+    scrollFrame = null
+    updateActiveSection()
+  })
+}
+
 onMounted(() => {
-  loadDashboard()
+  const replacementSection = LEGACY_SECTION_IDS[window.location.hash]
 
-  const sections = document.querySelectorAll<HTMLElement>('[data-nav-section]')
+  if (replacementSection) {
+    window.history.replaceState(null, '', `#${replacementSection}`)
+  }
 
-  sectionObserver = new IntersectionObserver(
-    (entries) => {
-      const visibleSection = entries
-        .filter((entry) => entry.isIntersecting)
-        .sort((first, second) => second.intersectionRatio - first.intersectionRatio)[0]
+  void loadDashboard().finally(() => {
+    window.requestAnimationFrame(() => {
+      const hash = window.location.hash
+      const target = hash
+        ? document.querySelector<HTMLElement>(hash)
+        : null
 
-      if (visibleSection) {
-        activeSection.value = visibleSection.target.id as SectionId
-      }
-    },
-    {
-      rootMargin: '-96px 0px -55% 0px',
-      threshold: [0, 0.1, 0.25, 0.5],
-    },
-  )
+      target?.scrollIntoView()
+      updateActiveSection()
+    })
+  })
 
-  sections.forEach((section) => sectionObserver?.observe(section))
+  window.addEventListener('scroll', scheduleNavigationUpdate, {
+    passive: true,
+  })
+  window.addEventListener('resize', scheduleNavigationUpdate)
+  scheduleNavigationUpdate()
 })
 
-onBeforeUnmount(() => sectionObserver?.disconnect())
+onBeforeUnmount(() => {
+  window.removeEventListener('scroll', scheduleNavigationUpdate)
+  window.removeEventListener('resize', scheduleNavigationUpdate)
+
+  if (scrollFrame !== null) {
+    window.cancelAnimationFrame(scrollFrame)
+  }
+})
 </script>
 
 <template>
   <div class="app-shell">
     <header class="topbar">
-      <a class="brand" href="#overview" aria-label="Ironbark Ridge overview">
+      <a class="brand" href="#site-overview" aria-label="Ironbark Ridge site overview">
         <span class="brand-mark" aria-hidden="true">
           <span></span>
           <span></span>
@@ -242,26 +352,23 @@ onBeforeUnmount(() => sectionObserver?.disconnect())
 
       <nav class="topnav" aria-label="dashboard sections">
         <a
-          href="#overview"
-          :class="{ active: activeSection === 'overview' }"
-          :aria-current="activeSection === 'overview' ? 'location' : undefined"
-          @click="activeSection = 'overview'"
+          href="#site-overview"
+          :class="{ active: activeSection === 'site-overview' }"
+          :aria-current="activeSection === 'site-overview' ? 'location' : undefined"
         >
           Site overview
         </a>
         <a
-          href="#operations"
-          :class="{ active: activeSection === 'operations' }"
-          :aria-current="activeSection === 'operations' ? 'location' : undefined"
-          @click="activeSection = 'operations'"
+          href="#performance"
+          :class="{ active: activeSection === 'performance' }"
+          :aria-current="activeSection === 'performance' ? 'location' : undefined"
         >
           Performance
         </a>
         <a
-          href="#attention"
-          :class="{ active: activeSection === 'attention' }"
-          :aria-current="activeSection === 'attention' ? 'location' : undefined"
-          @click="activeSection = 'attention'"
+          href="#review-queue"
+          :class="{ active: activeSection === 'review-queue' }"
+          :aria-current="activeSection === 'review-queue' ? 'location' : undefined"
         >
           Review queue
         </a>
@@ -295,7 +402,7 @@ onBeforeUnmount(() => sectionObserver?.disconnect())
     </header>
 
     <main>
-      <section id="overview" class="page-intro" data-nav-section>
+      <section id="site-overview" class="page-intro" data-nav-section>
         <div>
           <p class="eyebrow">Sustainability command view</p>
           <h1>Operational risk, without the noise</h1>
@@ -385,14 +492,23 @@ onBeforeUnmount(() => sectionObserver?.disconnect())
           </article>
         </section>
 
-        <section id="operations" class="dashboard-grid" data-nav-section>
+        <section id="performance" class="dashboard-grid" data-nav-section>
           <article class="panel emissions-panel">
             <header class="panel-header">
               <div>
                 <p class="eyebrow">Climate performance</p>
                 <h2>Monthly emissions by scope</h2>
               </div>
-              <span class="panel-note">kg converted to tonnes</span>
+              <div class="panel-notes">
+                <span
+                  v-if="incompleteEmissionsMonths.length"
+                  class="completeness-note"
+                  :title="incompleteEmissionsMonths.map(formatMonth).join(', ')"
+                >
+                  {{ incompleteEmissionsMonths.length }} incomplete month{{ incompleteEmissionsMonths.length === 1 ? '' : 's' }}
+                </span>
+                <span class="panel-note">kg converted to tonnes</span>
+              </div>
             </header>
             <EmissionsChart :data="dashboard.emissions" />
           </article>
@@ -435,6 +551,47 @@ onBeforeUnmount(() => sectionObserver?.disconnect())
             </p>
           </article>
 
+          <article
+            v-if="powerDisruptionInsight"
+            class="panel linked-insight-panel"
+          >
+            <div class="linked-insight-copy">
+              <p class="eyebrow">Cross-dataset signal</p>
+              <h2>March outage shifted the emissions profile</h2>
+              <p>
+                Scope 1 rose while Scope 2 fell as the site moved from grid
+                electricity to backup diesel generation. The same disruption
+                period also contains a workforce fatigue signal.
+              </p>
+              <div class="insight-evidence" aria-label="supporting source records">
+                <span>
+                  Grid disruption
+                  <strong>{{ powerDisruptionInsight.outageIncidentId }}</strong>
+                </span>
+                <span>
+                  Crew fatigue
+                  <strong>{{ powerDisruptionInsight.fatigueIncidentId }}</strong>
+                </span>
+              </div>
+              <small>
+                cross-dataset correlation for review, not proof of causation
+              </small>
+            </div>
+
+            <div class="insight-shifts" aria-label="February to March 2026 change">
+              <div>
+                <span>Scope 1</span>
+                <strong>+{{ powerDisruptionInsight.scope1Increase }}%</strong>
+                <small>vs Feb 2026</small>
+              </div>
+              <div>
+                <span>Scope 2</span>
+                <strong>-{{ powerDisruptionInsight.scope2Decrease }}%</strong>
+                <small>vs Feb 2026</small>
+              </div>
+            </div>
+          </article>
+
           <article class="panel incidents-panel">
             <header class="panel-header">
               <div>
@@ -449,7 +606,7 @@ onBeforeUnmount(() => sectionObserver?.disconnect())
           </article>
         </section>
 
-        <section id="attention" class="attention-grid" data-nav-section>
+        <section id="review-queue" class="attention-grid" data-nav-section>
           <article class="panel attention-panel">
             <header class="panel-header">
               <div>
