@@ -43,6 +43,7 @@ JOB_DEMAND_INDICATORS = (
     "deadline",
     "overtime",
     "long hours",
+    "extended shift",
     "understaffed",
     "understaffing",
     "staff shortage",
@@ -477,9 +478,14 @@ def analyze_incident(
 
             if attempt < max_attempts:
                 delay_seconds = 2 ** (attempt - 1)
+                error_summary = type(error).__name__
+
+                if isinstance(error, ModelResponseError):
+                    error_summary = f"{error_summary}: {error}"
+
                 print(
                     f"{incident['incident_id']}: attempt {attempt} failed "
-                    f"({type(error).__name__}); retrying in {delay_seconds}s",
+                    f"({error_summary}); retrying in {delay_seconds}s",
                     file=sys.stderr,
                 )
                 sleep(delay_seconds)

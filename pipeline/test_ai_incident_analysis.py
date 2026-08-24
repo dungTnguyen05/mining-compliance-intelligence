@@ -185,6 +185,19 @@ class FindingValidationTests(unittest.TestCase):
 
         analysis.validate_finding(finding, incident)
 
+    def test_accepts_job_demands_with_extended_shift_evidence(self):
+        incident = make_incident()
+        incident["description"] = (
+            "Multiple crews reporting fatigue after extended shifts covering "
+            "generator operations and manual restarts during the March power "
+            "outage."
+        )
+        finding = make_finding()
+        finding["psychosocial_types"] = ["job_demands"]
+        finding["category_evidence_quote"] = "fatigue after extended shifts"
+
+        analysis.validate_finding(finding, incident)
+
 class RetryTests(unittest.TestCase):
     def test_retries_rejected_model_finding(self):
         finding = make_finding()
