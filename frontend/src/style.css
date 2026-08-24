@@ -474,6 +474,21 @@ h1 {
   font-size: 0.65rem;
 }
 
+.panel-notes {
+  display: grid;
+  gap: 4px;
+  justify-items: end;
+}
+
+.completeness-note {
+  padding: 5px 8px;
+  color: #8a5500;
+  background: var(--amber-soft);
+  border-radius: 8px;
+  font-size: 0.62rem;
+  font-weight: 750;
+}
+
 .emissions-panel {
   min-height: 380px;
 }
@@ -548,6 +563,88 @@ h1 {
   color: #9eafa6;
   font-size: 0.63rem;
   line-height: 1.5;
+}
+
+.linked-insight-panel {
+  display: grid;
+  grid-column: 1 / -1;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 32px;
+  background:
+    linear-gradient(120deg, rgba(198, 217, 145, 0.18), transparent 48%),
+    rgba(255, 255, 255, 0.9);
+}
+
+.linked-insight-copy h2 {
+  margin: 0 0 8px;
+  color: var(--ink);
+  font-family: Georgia, "Times New Roman", serif;
+  font-size: 1.35rem;
+  font-weight: 500;
+}
+
+.linked-insight-copy > p:not(.eyebrow) {
+  max-width: 720px;
+  margin: 0;
+  color: var(--ink-soft);
+  font-size: 0.74rem;
+  line-height: 1.6;
+}
+
+.insight-evidence {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin: 14px 0 10px;
+}
+
+.insight-evidence span {
+  padding: 6px 9px;
+  color: #66776f;
+  background: rgba(237, 238, 229, 0.8);
+  border-radius: 8px;
+  font-size: 0.62rem;
+}
+
+.insight-evidence strong {
+  margin-left: 5px;
+  color: var(--forest);
+}
+
+.linked-insight-copy > small {
+  color: #87948e;
+  font-size: 0.59rem;
+}
+
+.insight-shifts {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(105px, 1fr));
+  gap: 10px;
+}
+
+.insight-shifts div {
+  min-width: 112px;
+  padding: 14px;
+  background: var(--white);
+  border: 1px solid var(--line);
+  border-radius: 12px;
+}
+
+.insight-shifts span,
+.insight-shifts small {
+  display: block;
+  color: #74857d;
+  font-size: 0.6rem;
+}
+
+.insight-shifts strong {
+  display: block;
+  margin: 5px 0 3px;
+  color: var(--forest);
+  font-family: Georgia, "Times New Roman", serif;
+  font-size: 1.6rem;
+  font-weight: 500;
 }
 
 .incidents-panel {
@@ -1060,6 +1157,19 @@ footer {
 
   .panel-note {
     padding-top: 0;
+  }
+
+  .panel-notes {
+    justify-items: start;
+  }
+
+  .linked-insight-panel {
+    grid-template-columns: 1fr;
+    gap: 20px;
+  }
+
+  .insight-shifts {
+    width: 100%;
   }
 
   .finding-meta {
