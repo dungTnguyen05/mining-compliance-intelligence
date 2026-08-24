@@ -1,0 +1,210 @@
+# test grounded incident analysis without external API calls
+
+from __future__ import annotations
+
+import json
+import sys
+import unittest
+from copy import deepcopy
+from pathlib import Path
+from unittest.mock import patch
+
+PIPELINE_DIR = Path(__file__).resolve().parent
+sys.path.insert(0, str(PIPELINE_DIR))
+
+import ai_incident_analysis as analysis
+
+def make_incident() -> dict:
+    return {
+        "incident_id": "INC-2025-127",
+        "incident_date": "2025-07-08",
+        "location": "Open Cut - South Pit",
+        "type_code": "OTH",
+        "severity": "Low",
+        "description": (
+            "Operator raised concerns about repeated verbal abuse from supervisor "
+            "over several weeks, feeling anxious before shift."
+        ),
+        "source_row": 16,
+        "source_record_hash": "a" * 64,
+    }
+
+def make_finding() -> dict:
+    return {
+        "primary_hazard_domain": "psychosocial",
+        "secondary_hazard_domains": [],
+        "event_mechanism": "bullying_or_harmful_behavior",
+        "psychosocial_hazard": True,
+        "psychosocial_types": [
+            "bullying",
+            "conflict_or_poor_workplace_relationships",
+        ],
+        "severity_consistency": "insufficient_context",
+        "suggested_severity": "Not assessed",
+        "category_evidence_quote": (
+            "repeated verbal abuse from supervisor over several weeks"
+        ),
+        "severity_evidence_quote": None,
+        "explanation": "The description reports repeated harmful behavior.",
+    }
+
+class IncidentLoadingTests(unittest.TestCase):
+    def test_loads_all_incidents_and_preserves_source_row(self):
+        incidents = analysis.load_incidents()
+        incident = analysis.find_incident(incidents, "INC-2025-127")
+
+        self.assertEqual(len(incidents), 42)
+        self.assertEqual(incident["source_row"], 16)
+        self.assertEqual(len(incident["source_record_hash"]), 64)
+
+    def test_raw_source_hash_is_stable_and_sensitive_to_changes(self):
+        record = {
+            "incident_id": "INC-1",
+            "description": "original description",
+        }
+
+        first_hash = analysis.hash_source_record(
+            record,
+            ("incident_id", "description"),
+        )
+        second_hash = analysis.hash_source_record(
+            record,
+            ("incident_id", "description"),
+        )
+
+        changed_record = {
+            **record,
+            "description": "changed description",
+        }
+        changed_hash = analysis.hash_source_record(
+            changed_record,
+            ("incident_id", "description"),
+        )
+
+        self.assertEqual(first_hash, second_hash)
+        self.assertNotEqual(first_hash, changed_hash)
+
+    def test_model_input_contains_only_required_analysis_fields(self):
+        model_input = analysis.build_model_input(make_incident())
+
+        self.assertEqual(
+            model_input,
+            {
+                "recorded_type_code": "OTH",
+                "recorded_severity": "Low",
+                "description": make_incident()["description"],
+            },
+        )
+
+class FindingValidationTests(unittest.TestCase):
+    def test_accepts_grounded_psychosocial_finding(self):
+        incident = make_incident()
+        finding = analysis.parse_finding(json.dumps(make_finding()))
+
+        analysis.validate_finding(finding, incident)
+
+    def test_rejects_schema_value_outside_taxonomy(self):
+        finding = make_finding()
+        finding["primary_hazard_domain"] = "workplace_drama"
+
+        with self.assertRaises(analysis.ModelResponseError):
+            analysis.parse_finding(json.dumps(finding))
+
+    def test_rejects_invented_evidence(self):
+        finding = make_finding()
+        finding["category_evidence_quote"] = "invented evidence"
+
+        with self.assertRaisesRegex(
+            analysis.ModelResponseError,
+            "exact substring",
+        ):
+            analysis.validate_finding(finding, make_incident())
+
+    def test_insufficient_context_cannot_include_severity_evidence(self):
+        finding = make_finding()
+        finding["severity_evidence_quote"] = "feeling anxious before shift"
+
+        with self.assertRaisesRegex(
+            analysis.ModelResponseError,
+            "cannot include severity evidence",
+        ):
+            analysis.validate_finding(finding, make_incident())
+
+    def test_consistent_severity_requires_evidence(self):
+        finding = make_finding()
+        finding["severity_consistency"] = "consistent"
+        finding["suggested_severity"] = "Low"
+
+        with self.assertRaisesRegex(
+            analysis.ModelResponseError,
+            "requires grounded severity evidence",
+        ):
+            analysis.validate_finding(finding, make_incident())
+
+    def test_inconsistent_severity_must_suggest_different_value(self):
+        finding = make_finding()
+        finding["severity_consistency"] = "appears_inconsistent"
+        finding["suggested_severity"] = "Low"
+        finding["severity_evidence_quote"] = "feeling anxious before shift"
+
+        with self.assertRaisesRegex(
+            analysis.ModelResponseError,
+            "suggest a different severity",
+        ):
+            analysis.validate_finding(finding, make_incident())
+
+    def test_psychosocial_flag_requires_psychosocial_domain(self):
+        finding = make_finding()
+        finding["primary_hazard_domain"] = "other"
+
+        with self.assertRaisesRegex(
+            analysis.ModelResponseError,
+            "must include its hazard domain",
+        ):
+            analysis.validate_finding(finding, make_incident())
+
+class RetryTests(unittest.TestCase):
+    def test_retries_rejected_model_finding(self):
+        finding = make_finding()
+        provenance = {
+            "response_id": "response-1",
+            "model": "test-model",
+            "processed_at": "2026-08-24T00:00:00+00:00",
+        }
+
+        with patch.object(
+            analysis,
+            "request_finding",
+            side_effect=[
+                analysis.ModelResponseError("not grounded"),
+                (finding, provenance),
+            ],
+        ):
+            result = analysis.analyze_incident(
+                object(),
+                make_incident(),
+                "test-model",
+                sleep=lambda _: None,
+            )
+
+        self.assertEqual(result["provenance"]["attempts"], 2)
+        self.assertEqual(result["source"]["source_row"], 16)
+
+    def test_does_not_retry_configuration_error(self):
+        with patch.object(
+            analysis,
+            "request_finding",
+            side_effect=analysis.ConfigurationError("bad configuration"),
+        ) as request:
+            with self.assertRaises(analysis.ConfigurationError):
+                analysis.analyze_incident(
+                    object(),
+                    make_incident(),
+                    "test-model",
+                    sleep=lambda _: None,
+                )
+
+        self.assertEqual(request.call_count, 1)
+
+if __name__ == "__main__":
+    unittest.main()

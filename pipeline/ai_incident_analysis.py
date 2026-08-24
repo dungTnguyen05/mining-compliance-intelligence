@@ -26,6 +26,8 @@ from clean_data import clean_incident_register
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
 DEFAULT_INPUT_PATH = PROJECT_ROOT/"data"/"raw"/"incident_register.csv"
+DEFAULT_OUTPUT_PATH = PROJECT_ROOT/"data"/"processed"/"incident_ai_findings.jsonl"
+DEFAULT_FAILURES_PATH = PROJECT_ROOT/"data"/"processed"/"incident_ai_failures.jsonl"
 DEFAULT_TEST_INCIDENT_ID = "INC-2025-127"
 SOURCE_FIELDS = (
     "incident_id",
@@ -479,10 +481,93 @@ def find_incident(
 
     return matches[0]
 
+def write_jsonl(
+    path: Path,
+    records: Sequence[Mapping[str, Any]],
+) -> None:
+    """atomically replace one JSONL artifact"""
+    path.parent.mkdir(parents=True, exist_ok=True)
+    temporary_path = path.with_suffix(f"{path.suffix}.tmp")
+
+    with temporary_path.open(
+        "w",
+        encoding="utf-8",
+        newline="\n",
+    ) as output_file:
+        for record in records:
+            output_file.write(
+                json.dumps(
+                    record,
+                    ensure_ascii=False,
+                    sort_keys=True,
+                )
+            )
+            output_file.write("\n")
+
+    temporary_path.replace(path)
+
+def analyze_all(
+    client: Any,
+    incidents: Sequence[Mapping[str, Any]],
+    model: str,
+    *,
+    max_attempts: int,
+    input_path: Path,
+    output_path: Path,
+    failures_path: Path,
+) -> tuple[int, int]:
+    """process every incident and preserve both findings and failures"""
+    findings: list[dict[str, Any]] = []
+    failures: list[dict[str, Any]] = []
+
+    for position, incident in enumerate(incidents, start=1):
+        incident_id = incident["incident_id"]
+        print(
+            f"[{position}/{len(incidents)}] Analyzing {incident_id}...",
+            file=sys.stderr,
+        )
+
+        try:
+            findings.append(
+                analyze_incident(
+                    client,
+                    incident,
+                    model,
+                    max_attempts=max_attempts,
+                    input_path=input_path,
+                )
+            )
+        except Exception as error:
+            failures.append(
+                {
+                    "source": source_metadata(incident, input_path),
+                    "error": {
+                        "type": type(error).__name__,
+                        "message": str(error),
+                    },
+                    "provenance": {
+                        "model": model,
+                        "failed_at": datetime.now(timezone.utc).isoformat(),
+                        "attempts": max_attempts,
+                    },
+                }
+            )
+            print(f"{incident_id}: failed: {error}", file=sys.stderr)
+
+    write_jsonl(output_path, findings)
+    write_jsonl(failures_path, failures)
+
+    return len(findings), len(failures)
+
 def build_parser() -> argparse.ArgumentParser:
-    """build command line options for single-record analysis"""
+    """build command line options for one-record and batch modes"""
     parser = argparse.ArgumentParser(
         description="generate grounded AI incident findings"
+    )
+    parser.add_argument(
+        "--all",
+        action="store_true",
+        help="process every incident and write JSONL artifacts",
     )
     parser.add_argument(
         "--incident-id",
@@ -496,6 +581,18 @@ def build_parser() -> argparse.ArgumentParser:
         help="path to the raw incident register CSV",
     )
     parser.add_argument(
+        "--output",
+        type=Path,
+        default=DEFAULT_OUTPUT_PATH,
+        help="batch findings JSONL path",
+    )
+    parser.add_argument(
+        "--failures-output",
+        type=Path,
+        default=DEFAULT_FAILURES_PATH,
+        help="batch failures JSONL path",
+    )
+    parser.add_argument(
         "--max-attempts",
         type=int,
         default=3,
@@ -505,7 +602,7 @@ def build_parser() -> argparse.ArgumentParser:
     return parser
 
 def main(argv: Sequence[str] | None = None) -> int:
-    """analyze one incident and print its grounded finding"""
+    """run one smoke test or the complete incident batch"""
     args = build_parser().parse_args(argv)
 
     try:
@@ -513,17 +610,33 @@ def main(argv: Sequence[str] | None = None) -> int:
         incidents = load_incidents(args.input)
         client = create_gateway_client(api_key, base_url)
 
-        incident = find_incident(incidents, args.incident_id)
-        result = analyze_incident(
+        if not args.all:
+            incident = find_incident(incidents, args.incident_id)
+            result = analyze_incident(
+                client,
+                incident,
+                model,
+                max_attempts=args.max_attempts,
+                input_path=args.input,
+            )
+            print(json.dumps(result, ensure_ascii=False, indent=2))
+            return 0
+
+        succeeded, failed = analyze_all(
             client,
-            incident,
+            incidents,
             model,
             max_attempts=args.max_attempts,
             input_path=args.input,
+            output_path=args.output,
+            failures_path=args.failures_output,
         )
-        print(json.dumps(result, ensure_ascii=False, indent=2))
+        print(
+            f"wrote {succeeded} findings to {args.output}; "
+            f"wrote {failed} failures to {args.failures_output}"
+        )
 
-        return 0
+        return 1 if failed else 0
     except (IncidentAnalysisError, OSError, ValueError) as error:
         print(f"error: {error}", file=sys.stderr)
         return 1
