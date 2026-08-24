@@ -7,6 +7,7 @@ import sys
 import unittest
 from copy import deepcopy
 from pathlib import Path
+from tempfile import TemporaryDirectory
 from unittest.mock import patch
 
 PIPELINE_DIR = Path(__file__).resolve().parent
@@ -226,6 +227,123 @@ class RetryTests(unittest.TestCase):
                 )
 
         self.assertEqual(request.call_count, 1)
+
+class BatchResumeTests(unittest.TestCase):
+    def make_distinct_incident(
+        self,
+        incident_id: str,
+        record_hash: str,
+    ) -> dict:
+        incident = deepcopy(make_incident())
+        incident["incident_id"] = incident_id
+        incident["source_record_hash"] = record_hash
+
+        return incident
+
+    def make_result(self, incident: dict) -> dict:
+        return {
+            "source": {
+                "record_hash": incident["source_record_hash"],
+            },
+            "finding": make_finding(),
+            "provenance": {
+                "model": "test-model",
+            },
+        }
+
+    def test_resumes_pending_records_and_removes_old_failure(self):
+        completed = self.make_distinct_incident("INC-1", "a" * 64)
+        pending = self.make_distinct_incident("INC-2", "b" * 64)
+
+        with TemporaryDirectory() as directory:
+            output_path = Path(directory) / "findings.jsonl"
+            failures_path = Path(directory) / "failures.jsonl"
+
+            analysis.write_jsonl(
+                output_path,
+                [self.make_result(completed)],
+            )
+            analysis.write_jsonl(
+                failures_path,
+                [
+                    {
+                        "source": {
+                            "record_hash": pending["source_record_hash"],
+                        },
+                        "error": {
+                            "type": "RateLimitError",
+                            "message": "limited",
+                        },
+                    }
+                ],
+            )
+
+            with patch.object(
+                analysis,
+                "analyze_incident",
+                return_value=self.make_result(pending),
+            ) as analyze:
+                succeeded, failed = analysis.analyze_all(
+                    object(),
+                    [completed, pending],
+                    "test-model",
+                    max_attempts=1,
+                    input_path=analysis.DEFAULT_INPUT_PATH,
+                    output_path=output_path,
+                    failures_path=failures_path,
+                    request_delay=0,
+                    sleep=lambda _: None,
+                )
+
+            self.assertEqual(analyze.call_count, 1)
+            self.assertEqual(
+                analyze.call_args.args[1]["incident_id"],
+                "INC-2",
+            )
+            self.assertEqual(succeeded, 2)
+            self.assertEqual(failed, 0)
+            self.assertEqual(len(analysis.read_jsonl(output_path)), 2)
+            self.assertEqual(analysis.read_jsonl(failures_path), [])
+
+    def test_checkpoints_rate_limit_failure_and_pauses_batch(self):
+        first = self.make_distinct_incident("INC-1", "a" * 64)
+        second = self.make_distinct_incident("INC-2", "b" * 64)
+
+        class RateLimitError(Exception):
+            status_code = 429
+
+        with TemporaryDirectory() as directory:
+            output_path = Path(directory) / "findings.jsonl"
+            failures_path = Path(directory) / "failures.jsonl"
+
+            with patch.object(
+                analysis,
+                "analyze_incident",
+                side_effect=RateLimitError("limited"),
+            ) as analyze:
+                succeeded, failed = analysis.analyze_all(
+                    object(),
+                    [first, second],
+                    "test-model",
+                    max_attempts=1,
+                    input_path=analysis.DEFAULT_INPUT_PATH,
+                    output_path=output_path,
+                    failures_path=failures_path,
+                    request_delay=0,
+                    sleep=lambda _: None,
+                )
+
+            saved_failures = analysis.read_jsonl(failures_path)
+
+            self.assertEqual(analyze.call_count, 1)
+            self.assertEqual(succeeded, 0)
+            self.assertEqual(failed, 1)
+            self.assertEqual(len(saved_failures), 1)
+            self.assertEqual(
+                saved_failures[0]["source"]["record_hash"],
+                first["source_record_hash"],
+            )
+            self.assertEqual(analysis.read_jsonl(output_path), [])
 
 if __name__ == "__main__":
     unittest.main()

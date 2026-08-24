@@ -453,6 +453,24 @@ def is_retryable_error(error: Exception) -> bool:
         "RateLimitError",
     }
 
+def is_rate_limit_error(error: Exception) -> bool:
+    """return whether an exception chain contains a rate limit error"""
+    current_error: BaseException | None = error
+    visited_errors: set[int] = set()
+
+    while current_error is not None and id(current_error) not in visited_errors:
+        visited_errors.add(id(current_error))
+
+        if getattr(current_error, "status_code", None) == 429:
+            return True
+
+        if type(current_error).__name__ == "RateLimitError":
+            return True
+
+        current_error = current_error.__cause__ or current_error.__context__
+
+    return False
+
 def analyze_incident(
     client: Any,
     incident: Mapping[str, Any],
@@ -519,6 +537,34 @@ def find_incident(
 
     return matches[0]
 
+def read_jsonl(path: Path) -> list[dict[str, Any]]:
+    """read one JSONL artifact or return an empty collection"""
+    if not path.exists():
+        return []
+
+    records: list[dict[str, Any]] = []
+
+    with path.open("r", encoding="utf-8") as input_file:
+        for line_number, line in enumerate(input_file, start=1):
+            if not line.strip():
+                continue
+
+            try:
+                record = json.loads(line)
+            except json.JSONDecodeError as error:
+                raise IncidentAnalysisError(
+                    f"{path} contains invalid JSON on line {line_number}"
+                ) from error
+
+            if not isinstance(record, dict):
+                raise IncidentAnalysisError(
+                    f"{path} contains a non-object record on line {line_number}"
+                )
+
+            records.append(record)
+
+    return records
+
 def write_jsonl(
     path: Path,
     records: Sequence[Mapping[str, Any]],
@@ -544,6 +590,37 @@ def write_jsonl(
 
     temporary_path.replace(path)
 
+def index_artifacts_by_record_hash(
+    records: Sequence[Mapping[str, Any]],
+    path: Path,
+) -> dict[str, dict[str, Any]]:
+    """index saved artifacts by stable source record hash"""
+    indexed_records: dict[str, dict[str, Any]] = {}
+
+    for position, record in enumerate(records, start=1):
+        source = record.get("source")
+
+        if not isinstance(source, Mapping):
+            raise IncidentAnalysisError(
+                f"{path} record {position} has no source metadata"
+            )
+
+        record_hash = source.get("record_hash")
+
+        if not isinstance(record_hash, str) or not record_hash:
+            raise IncidentAnalysisError(
+                f"{path} record {position} has no source record hash"
+            )
+
+        if record_hash in indexed_records:
+            raise IncidentAnalysisError(
+                f"{path} contains duplicate record hash {record_hash}"
+            )
+
+        indexed_records[record_hash] = dict(record)
+
+    return indexed_records
+
 def analyze_all(
     client: Any,
     incidents: Sequence[Mapping[str, Any]],
@@ -553,49 +630,93 @@ def analyze_all(
     input_path: Path,
     output_path: Path,
     failures_path: Path,
+    request_delay: float = 0.0,
+    sleep: Callable[[float], None] = time.sleep,
 ) -> tuple[int, int]:
-    """process every incident and preserve both findings and failures"""
-    findings: list[dict[str, Any]] = []
-    failures: list[dict[str, Any]] = []
+    """resume pending incidents and checkpoint each result"""
+    if request_delay < 0:
+        raise ValueError("request_delay cannot be negative")
 
-    for position, incident in enumerate(incidents, start=1):
+    findings_by_hash = index_artifacts_by_record_hash(
+        read_jsonl(output_path),
+        output_path,
+    )
+    failures_by_hash = index_artifacts_by_record_hash(
+        read_jsonl(failures_path),
+        failures_path,
+    )
+
+    for completed_hash in findings_by_hash:
+        failures_by_hash.pop(completed_hash, None)
+
+    pending_incidents = [
+        incident
+        for incident in incidents
+        if incident["source_record_hash"] not in findings_by_hash
+    ]
+
+    completed_count = len(incidents) - len(pending_incidents)
+    print(
+        f"resuming {len(pending_incidents)} pending incidents; "
+        f"{completed_count} already complete",
+        file=sys.stderr,
+    )
+
+    write_jsonl(output_path, list(findings_by_hash.values()))
+    write_jsonl(failures_path, list(failures_by_hash.values()))
+
+    for position, incident in enumerate(pending_incidents, start=1):
         incident_id = incident["incident_id"]
+        record_hash = incident["source_record_hash"]
         print(
-            f"[{position}/{len(incidents)}] Analyzing {incident_id}...",
+            f"[{position}/{len(pending_incidents)}] Analyzing {incident_id}...",
             file=sys.stderr,
         )
 
         try:
-            findings.append(
-                analyze_incident(
-                    client,
-                    incident,
-                    model,
-                    max_attempts=max_attempts,
-                    input_path=input_path,
-                )
+            result = analyze_incident(
+                client,
+                incident,
+                model,
+                max_attempts=max_attempts,
+                sleep=sleep,
+                input_path=input_path,
             )
+            findings_by_hash[record_hash] = result
+            failures_by_hash.pop(record_hash, None)
         except Exception as error:
-            failures.append(
-                {
-                    "source": source_metadata(incident, input_path),
-                    "error": {
-                        "type": type(error).__name__,
-                        "message": str(error),
-                    },
-                    "provenance": {
-                        "model": model,
-                        "failed_at": datetime.now(timezone.utc).isoformat(),
-                        "attempts": max_attempts,
-                    },
-                }
-            )
+            failures_by_hash[record_hash] = {
+                "source": source_metadata(incident, input_path),
+                "error": {
+                    "type": type(error).__name__,
+                    "message": str(error),
+                },
+                "provenance": {
+                    "model": model,
+                    "failed_at": datetime.now(timezone.utc).isoformat(),
+                    "attempts": max_attempts,
+                },
+            }
             print(f"{incident_id}: failed: {error}", file=sys.stderr)
 
-    write_jsonl(output_path, findings)
-    write_jsonl(failures_path, failures)
+            write_jsonl(output_path, list(findings_by_hash.values()))
+            write_jsonl(failures_path, list(failures_by_hash.values()))
 
-    return len(findings), len(failures)
+            if is_rate_limit_error(error):
+                print(
+                    "batch paused after a persistent rate limit; rerun later "
+                    "to resume pending incidents",
+                    file=sys.stderr,
+                )
+                break
+        else:
+            write_jsonl(output_path, list(findings_by_hash.values()))
+            write_jsonl(failures_path, list(failures_by_hash.values()))
+
+        if request_delay and position < len(pending_incidents):
+            sleep(request_delay)
+
+    return len(findings_by_hash), len(failures_by_hash)
 
 def build_parser() -> argparse.ArgumentParser:
     """build command line options for one-record and batch modes"""
@@ -636,6 +757,12 @@ def build_parser() -> argparse.ArgumentParser:
         default=3,
         help="maximum attempts per incident (default: 3)",
     )
+    parser.add_argument(
+        "--request-delay",
+        type=float,
+        default=5.0,
+        help="seconds between batch requests (default: 5)",
+    )
 
     return parser
 
@@ -668,6 +795,7 @@ def main(argv: Sequence[str] | None = None) -> int:
             input_path=args.input,
             output_path=args.output,
             failures_path=args.failures_output,
+            request_delay=args.request_delay,
         )
         print(
             f"wrote {succeeded} findings to {args.output}; "
