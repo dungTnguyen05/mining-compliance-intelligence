@@ -1,6 +1,8 @@
 import { Router } from "express";
 
 import {
+    getIncidentAiFindings,
+    getIncidentAiSummary,
     getIncidentSummary,
     getIncidentTrends
 } from "./incidents.repository.js";
@@ -31,6 +33,32 @@ incidentsRouter.get("/trends", async (_request, response, next) => {
     }
     catch (error) {
         // send errors to the Express error handler
+        next(error);
+    }
+});
+
+// return grounded AI findings with source incident context
+incidentsRouter.get("/ai-findings", async (_request, response, next) => {
+    try {
+        const findings = await getIncidentAiFindings();
+
+        response.status(200).json({
+            data: findings
+        });
+    }
+    catch (error) {
+        next(error);
+    }
+});
+
+// summarize psychosocial and severity-review findings
+incidentsRouter.get("/ai-summary", async (_request, response, next) => {
+    try {
+        const summary = await getIncidentAiSummary();
+
+        response.status(200).json(summary);
+    }
+    catch (error) {
         next(error);
     }
 });

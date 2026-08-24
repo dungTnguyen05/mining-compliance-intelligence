@@ -31,7 +31,9 @@ vi.mock(
                 }
             ]
         }),
-        getIncidentTrends: vi.fn()
+        getIncidentTrends: vi.fn(),
+        getIncidentAiFindings: vi.fn(),
+        getIncidentAiSummary: vi.fn()
     })
 );
 

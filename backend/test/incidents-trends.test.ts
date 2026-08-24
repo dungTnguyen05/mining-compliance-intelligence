@@ -5,6 +5,8 @@ vi.mock(
     "../src/modules/incidents/incidents.repository.js",
     () => ({
         getIncidentSummary: vi.fn(),
+        getIncidentAiFindings: vi.fn(),
+        getIncidentAiSummary: vi.fn(),
 
         getIncidentTrends: vi.fn().mockResolvedValue([
             {

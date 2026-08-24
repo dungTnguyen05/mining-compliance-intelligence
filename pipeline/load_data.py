@@ -14,6 +14,7 @@ from clean_data import (
     clean_suppliers,
 )
 
+from incident_source import add_incident_source_identity
 from validate_data import (
     validate_incident_register,
     validate_suppliers,
@@ -55,6 +56,7 @@ def clear_existing_data(connection):
                 electricity_meters,
                 emission_factors,
                 fuel_deliveries,
+                incident_ai_findings,
                 incidents,
                 suppliers
             RESTART IDENTITY CASCADE
@@ -69,7 +71,12 @@ def load_cleaned_data():
     electricity = pd.read_csv(DATA_DIR/"electricity_meter_readings.csv")
     emission_factors = pd.read_csv(DATA_DIR/"emission_factors.csv")
     fuel_deliveries = pd.read_csv(DATA_DIR/"fuel_deliveries.csv")
-    incident_register = pd.read_csv(DATA_DIR/"incident_register.csv")
+    incident_register = pd.read_csv(
+        DATA_DIR/"incident_register.csv",
+        dtype=str,
+        keep_default_na=False,
+    )
+    incident_register = add_incident_source_identity(incident_register)
     suppliers = pd.read_csv(DATA_DIR/"suppliers.csv")
 
     # clean datasets
@@ -209,9 +216,11 @@ def insert_incidents(connection, incident_register):
                     location,
                     type_code,
                     severity,
-                    description
+                    description,
+                    source_row,
+                    source_record_hash
                 )
-                VALUES (%s, %s, %s, %s, %s, %s)
+                VALUES (%s, %s, %s, %s, %s, %s, %s, %s)
                 """,
                 (
                     row["incident_id"],
@@ -220,8 +229,23 @@ def insert_incidents(connection, incident_register):
                     row["type_code"],
                     row["severity"],
                     row["description"],
+                    int(row["source_row"]),
+                    row["source_record_hash"],
                 ),
             )
+
+    connection.commit()
+
+def enforce_incident_source_constraints(connection):
+    # enforce source identity after existing databases have been reloaded
+    with connection.cursor() as cursor:
+        cursor.execute(
+            """
+            ALTER TABLE incidents
+                ALTER COLUMN source_row SET NOT NULL,
+                ALTER COLUMN source_record_hash SET NOT NULL
+            """
+        )
 
     connection.commit()
 
@@ -328,6 +352,7 @@ def main():
         insert_emission_factors(connection, emission_factors)
         insert_fuel_deliveries(connection, fuel_deliveries)
         insert_incidents(connection, incident_register)
+        enforce_incident_source_constraints(connection)
         insert_suppliers(connection, suppliers)
 
         # insert fixed and unresolved data quality issues
