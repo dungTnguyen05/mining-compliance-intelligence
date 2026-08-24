@@ -3,16 +3,17 @@ import { database } from "../../db.js";
 // PostgreSQL returns NUMERIC values as strings
 interface MonthlyEmissionsRow {
     month: string;
-    scope_1_kg_co2e: string;
-    scope_2_kg_co2e: string;
-    total_kg_co2e: string;
+    scope_1_kg_co2e: string | null;
+    scope_2_kg_co2e: string | null;
+    total_kg_co2e: string | null;
 }
 
 export interface MonthlyEmissions {
     month: string;
-    scope1KgCO2e: number;
-    scope2KgCO2e: number;
-    totalKgCO2e: number;
+    scope1KgCO2e: number | null;
+    scope2KgCO2e: number | null;
+    totalKgCO2e: number | null;
+    missingScopes: number[];
 }
 
 // calculate monthly Scope 1 and Scope 2 emissions from cleaned activity data
@@ -63,19 +64,13 @@ const monthlyEmissionsQuery = `
     )
     SELECT
         TO_CHAR(months.month, 'YYYY-MM') AS month,
-        ROUND(
-            COALESCE(scope_1.kg_co2e, 0),
-            2
-        ) AS scope_1_kg_co2e,
-        ROUND(
-            COALESCE(scope_2.kg_co2e, 0),
-            2
-        ) AS scope_2_kg_co2e,
-        ROUND(
-            COALESCE(scope_1.kg_co2e, 0)
-            + COALESCE(scope_2.kg_co2e, 0),
-            2
-        ) AS total_kg_co2e
+        ROUND(scope_1.kg_co2e, 2) AS scope_1_kg_co2e,
+        ROUND(scope_2.kg_co2e, 2) AS scope_2_kg_co2e,
+        CASE
+            WHEN scope_1.kg_co2e IS NULL OR scope_2.kg_co2e IS NULL
+                THEN NULL
+            ELSE ROUND(scope_1.kg_co2e + scope_2.kg_co2e, 2)
+        END AS total_kg_co2e
     FROM months
     LEFT JOIN scope_1
         ON scope_1.month = months.month
@@ -93,8 +88,18 @@ export async function getMonthlyEmissions(): Promise<MonthlyEmissions[]> {
     // convert database values to the API response format
     return result.rows.map((row) => ({
         month: row.month,
-        scope1KgCO2e: Number(row.scope_1_kg_co2e),
-        scope2KgCO2e: Number(row.scope_2_kg_co2e),
-        totalKgCO2e: Number(row.total_kg_co2e)
+        scope1KgCO2e: row.scope_1_kg_co2e === null
+            ? null
+            : Number(row.scope_1_kg_co2e),
+        scope2KgCO2e: row.scope_2_kg_co2e === null
+            ? null
+            : Number(row.scope_2_kg_co2e),
+        totalKgCO2e: row.total_kg_co2e === null
+            ? null
+            : Number(row.total_kg_co2e),
+        missingScopes: [
+            ...(row.scope_1_kg_co2e === null ? [1] : []),
+            ...(row.scope_2_kg_co2e === null ? [2] : [])
+        ]
     }));
 }

@@ -28,7 +28,8 @@ const totalEmissionsTonnes = computed(() => {
 
   return (
     dashboard.value.emissions.reduce(
-      (total, item) => total + item.totalKgCO2e,
+      (total, item) =>
+        total + (item.scope1KgCO2e ?? 0) + (item.scope2KgCO2e ?? 0),
       0,
     ) / 1_000
   )
@@ -337,9 +338,9 @@ onBeforeUnmount(() => sectionObserver?.disconnect())
               <span class="metric-icon emissions-icon" aria-hidden="true">Co2</span>
               <span class="metric-state neutral">18 months</span>
             </div>
-            <p>Total emissions</p>
+            <p>Reported emissions</p>
             <strong>{{ formatNumber(totalEmissionsTonnes) }}</strong>
-            <small>tonnes CO2e across Scope 1 and 2</small>
+            <small>tonnes CO2e from available Scope 1 and 2 data</small>
           </article>
 
           <article class="metric-card">
