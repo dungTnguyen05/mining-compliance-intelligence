@@ -92,6 +92,11 @@ PSYCHOSOCIAL_EVIDENCE_INDICATORS = {
     ),
 }
 
+MINIMUM_MEDIUM_SEVERITY_INDICATORS = (
+    "first aid",
+    "medical treatment",
+)
+
 JOB_DEMAND_INDICATORS = (
     "workload",
     "work load",
@@ -129,7 +134,8 @@ Select the smallest set of hazard domains and psychosocial types directly
 supported by explicit text in the description. Do not add a secondary domain
 only because equipment, electricity, or a location is mentioned; the text must
 describe an additional hazard. A walkway alone does not establish a
-slips_trips_falls hazard.
+slips_trips_falls hazard. Use other only as a primary domain when no defined
+domain fits; never include other as a secondary domain.
 
 Do not infer a psychosocial hazard source from feelings or symptoms alone. In
 particular, anxiety or stress alone does not establish job_demands. Select
@@ -153,6 +159,7 @@ Use this severity guide:
   or a credible near miss with injury potential.
 - High: fracture, hospitalization, surgery, lost-time injury, serious injury,
   major disruption, or a clearly described high-potential event.
+First aid or medical treatment can never be assessed as Low.
 
 Assess suggested_severity only from the description. When a severity can be
 assessed, set severity_consistency to consistent as a placeholder. Local code
@@ -161,7 +168,8 @@ placeholder. Do not discuss agreement with the recorded severity in the
 explanation.
 
 Do not invent injuries, causes, diagnoses, intent, consequences, or legal
-conclusions.
+conclusions. A response action such as deploying a spill kit or establishing an
+exclusion zone does not prove that an event was contained.
 
 Evidence quotes must be exact, case-sensitive substrings of the description.
 
@@ -310,6 +318,11 @@ def validate_taxonomy(finding: Mapping[str, Any]) -> None:
     if len(secondary_domains) != len(set(secondary_domains)):
         raise ModelResponseError("secondary hazard domains must be unique")
 
+    if "other" in secondary_domains:
+        raise ModelResponseError(
+            "other cannot be used as a secondary hazard domain"
+        )
+
 def validate_domain_evidence(finding: Mapping[str, Any]) -> None:
     """require supported domains to appear in the category evidence quote"""
     category_quote = finding["category_evidence_quote"]
@@ -395,6 +408,35 @@ def validate_severity(
                 "an inconsistent finding must suggest a different severity"
             )
 
+def validate_severity_grounding(
+    finding: Mapping[str, Any],
+    description: str,
+) -> None:
+    """enforce severity levels directly established by the description"""
+    if (
+        finding["suggested_severity"] == "Low"
+        and has_explicit_evidence(
+            description,
+            MINIMUM_MEDIUM_SEVERITY_INDICATORS,
+        )
+    ):
+        raise ModelResponseError(
+            "first aid or medical treatment requires at least Medium severity"
+        )
+
+def validate_explanation_grounding(
+    finding: Mapping[str, Any],
+    description: str,
+) -> None:
+    """reject containment claims not stated in the incident description"""
+    explanation = finding["explanation"].casefold()
+    normalized_description = description.casefold()
+
+    if "contain" in explanation and "contain" not in normalized_description:
+        raise ModelResponseError(
+            "explanation claims containment without explicit source evidence"
+        )
+
 def validate_psychosocial_finding(
     finding: Mapping[str, Any],
     description: str,
@@ -462,7 +504,9 @@ def validate_finding(
     validate_domain_evidence(finding)
     validate_evidence(finding, incident["description"])
     validate_severity(finding, incident["severity"])
+    validate_severity_grounding(finding, incident["description"])
     validate_psychosocial_finding(finding, incident["description"])
+    validate_explanation_grounding(finding, incident["description"])
 
 def create_gateway_client(api_key: str, base_url: str) -> Any:
     """create an OpenAI-compatible gateway client"""

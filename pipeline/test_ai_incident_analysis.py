@@ -110,6 +110,14 @@ class PromptTests(unittest.TestCase):
             "set severity_consistency to consistent as a placeholder",
             analysis.SYSTEM_PROMPT,
         )
+        self.assertIn(
+            "First aid or medical treatment can never be assessed as Low",
+            analysis.SYSTEM_PROMPT,
+        )
+        self.assertIn(
+            "does not prove that an event was contained",
+            analysis.SYSTEM_PROMPT,
+        )
 
 class FindingValidationTests(unittest.TestCase):
     def test_accepts_grounded_psychosocial_finding(self):
@@ -329,6 +337,56 @@ class FindingValidationTests(unittest.TestCase):
             "work_related_fatigue requires explicit evidence",
         ):
             analysis.validate_finding(finding, incident)
+
+    def test_rejects_other_as_secondary_domain(self):
+        finding = make_finding()
+        finding["secondary_hazard_domains"] = ["other"]
+
+        with self.assertRaisesRegex(
+            analysis.ModelResponseError,
+            "other cannot be used as a secondary",
+        ):
+            analysis.validate_finding(finding, make_incident())
+
+    def test_rejects_low_severity_when_first_aid_is_reported(self):
+        incident = make_incident()
+        incident["description"] = (
+            "Operator slipped on wet stairs, grazed elbow, first aid "
+            "administered."
+        )
+        incident["severity"] = "Medium"
+        finding = make_finding()
+        finding.update(
+            {
+                "primary_hazard_domain": "slips_trips_falls",
+                "secondary_hazard_domains": [],
+                "event_mechanism": "slip_or_trip",
+                "psychosocial_hazard": False,
+                "psychosocial_types": [],
+                "severity_consistency": "appears_inconsistent",
+                "suggested_severity": "Low",
+                "category_evidence_quote": "Operator slipped on wet stairs",
+                "severity_evidence_quote": (
+                    "grazed elbow, first aid administered"
+                ),
+            }
+        )
+
+        with self.assertRaisesRegex(
+            analysis.ModelResponseError,
+            "requires at least Medium severity",
+        ):
+            analysis.validate_finding(finding, incident)
+
+    def test_rejects_unsupported_containment_claim(self):
+        finding = make_finding()
+        finding["explanation"] = "The event was contained."
+
+        with self.assertRaisesRegex(
+            analysis.ModelResponseError,
+            "containment without explicit source evidence",
+        ):
+            analysis.validate_finding(finding, make_incident())
 
 class RetryTests(unittest.TestCase):
     def test_retries_rejected_model_finding(self):
