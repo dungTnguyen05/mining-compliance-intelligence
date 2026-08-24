@@ -103,6 +103,7 @@ CONTEXT_DEPENDENT_SEVERITY_MECHANISMS = {
     "dropped_object",
     "environmental_threshold_exceedance",
     "unsafe_vehicle_interaction",
+    "speeding",
 }
 
 SPILL_MAGNITUDE_INDICATORS = (
@@ -114,6 +115,22 @@ SPILL_MAGNITUDE_INDICATORS = (
     "off-site",
     "waterway",
     "environmental harm",
+)
+
+DUST_ENVIRONMENTAL_EVIDENCE_INDICATORS = (
+    "off site",
+    "off-site",
+    "boundary",
+    "community",
+    "environmental impact",
+    "waterway",
+)
+
+INSUFFICIENT_CONTEXT_EXPLANATION_INDICATORS = (
+    "cannot be assessed",
+    "not enough information",
+    "does not provide enough",
+    "insufficient context",
 )
 
 JOB_DEMAND_INDICATORS = (
@@ -184,8 +201,9 @@ Do not treat missing injury or damage details as proof that an event was Low.
 Use insufficient_context when the description does not establish the event's
 actual or credible potential consequence. This especially applies to exposure
 or environmental threshold exceedances, unsafe vehicle interactions, dropped
-objects, and releases with no stated magnitude or impact. A site-wide power
-loss lasting days or weeks is a major disruption and supports High severity.
+objects, speeding events, and releases with no stated magnitude or impact. A
+site-wide power loss lasting days or weeks is a major disruption and supports
+High severity.
 
 Use environmental_threshold_exceedance when an environmental control or
 monitoring trigger is exceeded without an explicitly described spill or
@@ -374,6 +392,50 @@ def normalize_taxonomy(finding: dict[str, Any]) -> list[str]:
 
     return normalizations
 
+def has_unsupported_dust_environmental_domain(
+    finding: Mapping[str, Any],
+    description: str,
+) -> bool:
+    """return whether dust was given an unsupported environmental domain"""
+    domains = [
+        finding["primary_hazard_domain"],
+        *finding["secondary_hazard_domains"],
+    ]
+
+    return (
+        finding["event_mechanism"] == "dust_exceedance"
+        and "environmental" in domains
+        and not has_explicit_evidence(
+            description,
+            DUST_ENVIRONMENTAL_EVIDENCE_INDICATORS,
+        )
+    )
+
+def normalize_context_dependent_domains(
+    finding: dict[str, Any],
+    description: str,
+) -> list[str]:
+    """remove environmental from dust findings without impact evidence"""
+    if not has_unsupported_dust_environmental_domain(finding, description):
+        return []
+
+    if finding["primary_hazard_domain"] == "environmental":
+        finding["primary_hazard_domain"] = "occupational_health"
+    else:
+        finding["secondary_hazard_domains"].remove("environmental")
+
+    return ["removed_unsupported_dust_environmental_domain"]
+
+def validate_context_dependent_domains(
+    finding: Mapping[str, Any],
+    description: str,
+) -> None:
+    """reject environmental dust findings without impact evidence"""
+    if has_unsupported_dust_environmental_domain(finding, description):
+        raise ModelResponseError(
+            "dust requires explicit evidence for an environmental domain"
+        )
+
 def validate_domain_evidence(finding: Mapping[str, Any]) -> None:
     """require supported domains to appear in the category evidence quote"""
     category_quote = finding["category_evidence_quote"]
@@ -475,6 +537,28 @@ def validate_severity_grounding(
             "first aid or medical treatment requires at least Medium severity"
         )
 
+    if finding["suggested_severity"] != "Low":
+        return
+
+    mechanism = finding["event_mechanism"]
+
+    if mechanism in CONTEXT_DEPENDENT_SEVERITY_MECHANISMS:
+        raise ModelResponseError(
+            f"{mechanism} requires consequence or magnitude context for Low "
+            "severity"
+        )
+
+    if (
+        mechanism == "spill_or_release"
+        and not has_explicit_evidence(
+            description,
+            SPILL_MAGNITUDE_INDICATORS,
+        )
+    ):
+        raise ModelResponseError(
+            "spill or release requires magnitude context for Low severity"
+        )
+
 def normalize_explanation(
     finding: dict[str, Any],
     description: str,
@@ -536,6 +620,74 @@ def normalize_context_dependent_severity(
         )
 
     return ["removed_unsupported_low_severity"]
+
+def explanation_asserts_assessed_severity(explanation: str) -> bool:
+    """return whether explanation asserts Low, Medium, or High severity"""
+    normalized_explanation = explanation.casefold()
+
+    return (
+        "severity" in normalized_explanation
+        and any(
+            re.search(rf"\b{severity}\b", normalized_explanation)
+            for severity in ("low", "medium", "high")
+        )
+    )
+
+def normalize_severity_explanation(
+    finding: dict[str, Any],
+) -> list[str]:
+    """align explanation with an insufficient-context severity result"""
+    if finding["suggested_severity"] != "Not assessed":
+        return []
+
+    normalizations: list[str] = []
+    sentences = re.split(r"(?<=[.!?])\s+", finding["explanation"])
+    grounded_sentences = [
+        sentence
+        for sentence in sentences
+        if not explanation_asserts_assessed_severity(sentence)
+    ]
+
+    if grounded_sentences != sentences:
+        finding["explanation"] = " ".join(grounded_sentences).strip()
+        normalizations.append("removed_conflicting_severity_explanation")
+
+    if not has_explicit_evidence(
+        finding["explanation"],
+        INSUFFICIENT_CONTEXT_EXPLANATION_INDICATORS,
+    ):
+        prefix = (
+            f"{finding['explanation'].rstrip()} "
+            if finding["explanation"]
+            else ""
+        )
+        finding["explanation"] = (
+            f"{prefix}The description does not provide enough consequence or "
+            "magnitude information to assess severity."
+        )
+        normalizations.append("added_insufficient_context_explanation")
+
+    return normalizations
+
+def validate_severity_explanation(
+    finding: Mapping[str, Any],
+) -> None:
+    """require explanation to agree with an insufficient-context result"""
+    if finding["suggested_severity"] != "Not assessed":
+        return
+
+    if explanation_asserts_assessed_severity(finding["explanation"]):
+        raise ModelResponseError(
+            "explanation asserts a severity after returning Not assessed"
+        )
+
+    if not has_explicit_evidence(
+        finding["explanation"],
+        INSUFFICIENT_CONTEXT_EXPLANATION_INDICATORS,
+    ):
+        raise ModelResponseError(
+            "insufficient context requires a severity explanation"
+        )
 
 def validate_explanation_grounding(
     finding: Mapping[str, Any],
@@ -614,12 +766,14 @@ def validate_finding(
 ) -> None:
     """run all local grounding and consistency checks"""
     validate_taxonomy(finding)
+    validate_context_dependent_domains(finding, incident["description"])
     validate_domain_evidence(finding)
     validate_evidence(finding, incident["description"])
     validate_severity(finding, incident["severity"])
     validate_severity_grounding(finding, incident["description"])
     validate_psychosocial_finding(finding, incident["description"])
     validate_explanation_grounding(finding, incident["description"])
+    validate_severity_explanation(finding)
 
 def create_gateway_client(api_key: str, base_url: str) -> Any:
     """create an OpenAI-compatible gateway client"""
@@ -677,6 +831,12 @@ def request_finding(
     finding = parse_finding(message.content)
     normalizations = normalize_taxonomy(finding)
     normalizations.extend(
+        normalize_context_dependent_domains(
+            finding,
+            incident["description"],
+        )
+    )
+    normalizations.extend(
         normalize_explanation(
             finding,
             incident["description"],
@@ -689,6 +849,7 @@ def request_finding(
         )
     )
     derive_severity_consistency(finding, incident["severity"])
+    normalizations.extend(normalize_severity_explanation(finding))
     validate_finding(finding, incident)
 
     provenance = {

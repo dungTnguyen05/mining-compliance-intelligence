@@ -46,7 +46,10 @@ def make_finding() -> dict:
             "repeated verbal abuse from supervisor over several weeks"
         ),
         "severity_evidence_quote": None,
-        "explanation": "The description reports repeated harmful behavior.",
+        "explanation": (
+            "The description reports repeated harmful behavior. The description "
+            "does not provide enough information to assess severity."
+        ),
     }
 
 class IncidentLoadingTests(unittest.TestCase):
@@ -367,6 +370,90 @@ class FindingValidationTests(unittest.TestCase):
         self.assertEqual(
             normalizations,
             ["removed_other_secondary_domain"],
+        )
+
+    def test_removes_unsupported_environmental_domain_from_dust(self):
+        finding = make_finding()
+        finding.update(
+            {
+                "primary_hazard_domain": "occupational_health",
+                "secondary_hazard_domains": ["environmental"],
+                "event_mechanism": "dust_exceedance",
+            }
+        )
+
+        normalizations = analysis.normalize_context_dependent_domains(
+            finding,
+            "Dust exceedance recorded at crusher, fogger offline.",
+        )
+
+        self.assertEqual(finding["secondary_hazard_domains"], [])
+        self.assertEqual(
+            normalizations,
+            ["removed_unsupported_dust_environmental_domain"],
+        )
+
+    def test_does_not_assume_low_for_speeding_without_context(self):
+        finding = make_finding()
+        finding.update(
+            {
+                "event_mechanism": "speeding",
+                "severity_consistency": "consistent",
+                "suggested_severity": "Low",
+                "severity_evidence_quote": "driver coached",
+                "explanation": "The record describes a speeding event.",
+            }
+        )
+
+        normalizations = analysis.normalize_context_dependent_severity(
+            finding,
+            "LV exceeded speed limit on haul road, driver coached.",
+        )
+
+        self.assertEqual(finding["suggested_severity"], "Not assessed")
+        self.assertEqual(
+            normalizations,
+            ["removed_unsupported_low_severity"],
+        )
+
+    def test_removes_conflicting_assessed_severity_explanation(self):
+        finding = make_finding()
+        finding["explanation"] = (
+            "The record describes a dropped object. No injury was reported, "
+            "so the severity is Low."
+        )
+
+        normalizations = analysis.normalize_severity_explanation(finding)
+
+        self.assertNotIn("severity is Low", finding["explanation"])
+        self.assertIn(
+            "does not provide enough consequence or magnitude",
+            finding["explanation"],
+        )
+        self.assertEqual(
+            normalizations,
+            [
+                "removed_conflicting_severity_explanation",
+                "added_insufficient_context_explanation",
+            ],
+        )
+        analysis.validate_severity_explanation(finding)
+
+    def test_adds_missing_insufficient_context_explanation(self):
+        finding = make_finding()
+        finding["explanation"] = (
+            "The description explicitly indicates an environmental release."
+        )
+
+        normalizations = analysis.normalize_severity_explanation(finding)
+
+        self.assertIn(
+            "does not provide enough consequence or magnitude",
+            finding["explanation"],
+        )
+        self.assertEqual(
+            normalizations,
+            ["added_insufficient_context_explanation"],
         )
 
     def test_does_not_assume_low_for_dust_exceedance(self):
