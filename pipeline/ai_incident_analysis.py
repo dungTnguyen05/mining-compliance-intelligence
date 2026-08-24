@@ -5,8 +5,11 @@ from __future__ import annotations
 import argparse
 import json
 import os
+import re
 import sys
 import time
+from collections import defaultdict
+from copy import deepcopy
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Callable, Mapping, Sequence
@@ -34,6 +37,101 @@ DEFAULT_OUTPUT_PATH = PROJECT_ROOT/"data"/"processed"/"incident_ai_findings.json
 DEFAULT_FAILURES_PATH = PROJECT_ROOT/"data"/"processed"/"incident_ai_failures.jsonl"
 DEFAULT_TEST_INCIDENT_ID = "INC-2025-127"
 SOURCE_FIELDS = INCIDENT_SOURCE_FIELDS
+ANALYSIS_VERSION = 3
+
+DOMAIN_EVIDENCE_INDICATORS = {
+    "electrical": (
+        "electrical",
+        "power",
+        "grid",
+        "substation",
+        "voltage",
+        "cable",
+        "generator",
+    ),
+    "plant_equipment": (
+        "equipment",
+        "machine",
+        "crusher",
+        "fogger",
+        "pump",
+        "excavator",
+        "dozer",
+        "belt",
+        "generator",
+        "tool",
+        "tyre",
+        "hose",
+    ),
+    "slips_trips_falls": (
+        "slip",
+        "trip",
+        "fall",
+        "fell",
+        "stumble",
+        "ladder",
+    ),
+}
+
+PSYCHOSOCIAL_EVIDENCE_INDICATORS = {
+    "lack_of_role_clarity": (
+        "unclear role",
+        "role ambiguity",
+        "unclear responsibilities",
+        "responsibilities unclear",
+        "unclear duties",
+        "duties unclear",
+        "expectations unclear",
+    ),
+    "work_related_fatigue": (
+        "fatigue",
+        "fatigued",
+        "tired",
+        "exhausted",
+        "poor sleep",
+        "sleep deprivation",
+    ),
+}
+
+MINIMUM_MEDIUM_SEVERITY_INDICATORS = (
+    "first aid",
+    "medical treatment",
+)
+
+CONTEXT_DEPENDENT_SEVERITY_MECHANISMS = {
+    "dust_exceedance",
+    "dropped_object",
+    "environmental_threshold_exceedance",
+    "unsafe_vehicle_interaction",
+    "speeding",
+}
+
+SPILL_MAGNITUDE_INDICATORS = (
+    "minor",
+    "litre",
+    "liter",
+    "contained",
+    "off site",
+    "off-site",
+    "waterway",
+    "environmental harm",
+)
+
+DUST_ENVIRONMENTAL_EVIDENCE_INDICATORS = (
+    "off site",
+    "off-site",
+    "boundary",
+    "community",
+    "environmental impact",
+    "waterway",
+)
+
+INSUFFICIENT_CONTEXT_EXPLANATION_INDICATORS = (
+    "cannot be assessed",
+    "not enough information",
+    "does not provide enough",
+    "insufficient context",
+)
 
 JOB_DEMAND_INDICATORS = (
     "workload",
@@ -43,6 +141,7 @@ JOB_DEMAND_INDICATORS = (
     "deadline",
     "overtime",
     "long hours",
+    "extended shift",
     "understaffed",
     "understaffing",
     "staff shortage",
@@ -67,14 +166,24 @@ Choose the event mechanism only from:
 Choose psychosocial types only from:
 {", ".join(PSYCHOSOCIAL_TYPES)}
 
-Select the smallest set of psychosocial types directly supported by explicit
-text in the description. Do not infer a hazard source from feelings or symptoms
-alone. In particular, anxiety or stress alone does not establish job_demands.
-Select job_demands only when the description explicitly reports workload, work
-pace, working hours, staffing, deadlines, emotional demands, or task demands.
+Select the smallest set of hazard domains and psychosocial types directly
+supported by explicit text in the description. Do not add a secondary domain
+only because equipment, electricity, or a location is mentioned; the text must
+describe an additional hazard. A walkway alone does not establish a
+slips_trips_falls hazard. Use other only as a primary domain when no defined
+domain fits; never include other as a secondary domain.
 
-Use the description as the evidence source. The recorded type code and severity
-are context only and may be incomplete or incorrect.
+Do not infer a psychosocial hazard source from feelings or symptoms alone. In
+particular, anxiety or stress alone does not establish job_demands. Select
+job_demands only when the description explicitly reports workload, work pace,
+working hours, staffing, deadlines, emotional demands, or task demands. Select
+work_related_fatigue only for explicit fatigue, tiredness, exhaustion, or sleep
+evidence. Select lack_of_role_clarity only for explicit uncertainty about
+roles, responsibilities, duties, or expectations.
+
+Use the description as the evidence source. The recorded type code is context
+only and may be incomplete or incorrect. The recorded severity is intentionally
+not supplied to the model so the suggested severity is assessed independently.
 
 Identify psychosocial hazards regardless of the recorded type code. When one is
 present, include psychosocial as a primary or secondary hazard domain and select
@@ -86,9 +195,30 @@ Use this severity guide:
   or a credible near miss with injury potential.
 - High: fracture, hospitalization, surgery, lost-time injury, serious injury,
   major disruption, or a clearly described high-potential event.
+First aid or medical treatment can never be assessed as Low.
+
+Do not treat missing injury or damage details as proof that an event was Low.
+Use insufficient_context when the description does not establish the event's
+actual or credible potential consequence. This especially applies to exposure
+or environmental threshold exceedances, unsafe vehicle interactions, dropped
+objects, speeding events, and releases with no stated magnitude or impact. A
+site-wide power loss lasting days or weeks is a major disruption and supports
+High severity.
+
+Use environmental_threshold_exceedance when an environmental control or
+monitoring trigger is exceeded without an explicitly described spill or
+release. Use occupational_health for exposure or illness hazards, not merely
+as a secondary domain for an acute traumatic injury.
+
+Assess suggested_severity only from the description. When a severity can be
+assessed, set severity_consistency to consistent as a placeholder. Local code
+will compare suggested_severity with the recorded severity and replace the
+placeholder. Do not discuss agreement with the recorded severity in the
+explanation.
 
 Do not invent injuries, causes, diagnoses, intent, consequences, or legal
-conclusions.
+conclusions. A response action such as deploying a spill kit or establishing an
+exclusion zone does not prove that an event was contained.
 
 Evidence quotes must be exact, case-sensitive substrings of the description.
 
@@ -160,7 +290,6 @@ def build_model_input(incident: Mapping[str, Any]) -> dict[str, str]:
     """select only fields needed for model analysis"""
     return {
         "recorded_type_code": incident["type_code"],
-        "recorded_severity": incident["severity"],
         "description": incident["description"],
     }
 
@@ -205,6 +334,26 @@ def parse_finding(content: str) -> dict[str, Any]:
 
     return finding
 
+def has_explicit_evidence(text: str, indicators: Sequence[str]) -> bool:
+    """return whether text contains one allowed grounding indicator"""
+    normalized_text = text.casefold()
+
+    return any(indicator in normalized_text for indicator in indicators)
+
+def derive_severity_consistency(
+    finding: dict[str, Any],
+    recorded_severity: str,
+) -> None:
+    """derive comparison status without exposing recorded severity to the model"""
+    suggested_severity = finding["suggested_severity"]
+
+    if suggested_severity == "Not assessed":
+        finding["severity_consistency"] = "insufficient_context"
+    elif suggested_severity == recorded_severity:
+        finding["severity_consistency"] = "consistent"
+    else:
+        finding["severity_consistency"] = "appears_inconsistent"
+
 def validate_taxonomy(finding: Mapping[str, Any]) -> None:
     """validate relationships not expressed by the JSON schema"""
     primary_domain = finding["primary_hazard_domain"]
@@ -217,6 +366,92 @@ def validate_taxonomy(finding: Mapping[str, Any]) -> None:
 
     if len(secondary_domains) != len(set(secondary_domains)):
         raise ModelResponseError("secondary hazard domains must be unique")
+
+    if "other" in secondary_domains:
+        raise ModelResponseError(
+            "other cannot be used as a secondary hazard domain"
+        )
+
+def normalize_taxonomy(finding: dict[str, Any]) -> list[str]:
+    """repair secondary domains that cannot add useful classification"""
+    secondary_domains = finding["secondary_hazard_domains"]
+    normalized_domains = list(dict.fromkeys(secondary_domains))
+    primary_domain = finding["primary_hazard_domain"]
+    normalizations: list[str] = []
+
+    if "other" in normalized_domains:
+        normalized_domains.remove("other")
+        normalizations.append("removed_other_secondary_domain")
+
+    if primary_domain in normalized_domains:
+        normalized_domains.remove(primary_domain)
+        normalizations.append("removed_duplicate_primary_domain")
+
+    if normalized_domains != secondary_domains:
+        finding["secondary_hazard_domains"] = normalized_domains
+
+    return normalizations
+
+def has_unsupported_dust_environmental_domain(
+    finding: Mapping[str, Any],
+    description: str,
+) -> bool:
+    """return whether dust was given an unsupported environmental domain"""
+    domains = [
+        finding["primary_hazard_domain"],
+        *finding["secondary_hazard_domains"],
+    ]
+
+    return (
+        finding["event_mechanism"] == "dust_exceedance"
+        and "environmental" in domains
+        and not has_explicit_evidence(
+            description,
+            DUST_ENVIRONMENTAL_EVIDENCE_INDICATORS,
+        )
+    )
+
+def normalize_context_dependent_domains(
+    finding: dict[str, Any],
+    description: str,
+) -> list[str]:
+    """remove environmental from dust findings without impact evidence"""
+    if not has_unsupported_dust_environmental_domain(finding, description):
+        return []
+
+    if finding["primary_hazard_domain"] == "environmental":
+        finding["primary_hazard_domain"] = "occupational_health"
+    else:
+        finding["secondary_hazard_domains"].remove("environmental")
+
+    return ["removed_unsupported_dust_environmental_domain"]
+
+def validate_context_dependent_domains(
+    finding: Mapping[str, Any],
+    description: str,
+) -> None:
+    """reject environmental dust findings without impact evidence"""
+    if has_unsupported_dust_environmental_domain(finding, description):
+        raise ModelResponseError(
+            "dust requires explicit evidence for an environmental domain"
+        )
+
+def validate_domain_evidence(finding: Mapping[str, Any]) -> None:
+    """require supported domains to appear in the category evidence quote"""
+    category_quote = finding["category_evidence_quote"]
+    domains = [
+        finding["primary_hazard_domain"],
+        *finding["secondary_hazard_domains"],
+    ]
+
+    for domain, indicators in DOMAIN_EVIDENCE_INDICATORS.items():
+        if domain in domains and not has_explicit_evidence(
+            category_quote,
+            indicators,
+        ):
+            raise ModelResponseError(
+                f"{domain} requires explicit evidence in the category quote"
+            )
 
 def validate_evidence(
     finding: Mapping[str, Any],
@@ -286,6 +521,187 @@ def validate_severity(
                 "an inconsistent finding must suggest a different severity"
             )
 
+def validate_severity_grounding(
+    finding: Mapping[str, Any],
+    description: str,
+) -> None:
+    """enforce severity levels directly established by the description"""
+    if (
+        finding["suggested_severity"] == "Low"
+        and has_explicit_evidence(
+            description,
+            MINIMUM_MEDIUM_SEVERITY_INDICATORS,
+        )
+    ):
+        raise ModelResponseError(
+            "first aid or medical treatment requires at least Medium severity"
+        )
+
+    if finding["suggested_severity"] != "Low":
+        return
+
+    mechanism = finding["event_mechanism"]
+
+    if mechanism in CONTEXT_DEPENDENT_SEVERITY_MECHANISMS:
+        raise ModelResponseError(
+            f"{mechanism} requires consequence or magnitude context for Low "
+            "severity"
+        )
+
+    if (
+        mechanism == "spill_or_release"
+        and not has_explicit_evidence(
+            description,
+            SPILL_MAGNITUDE_INDICATORS,
+        )
+    ):
+        raise ModelResponseError(
+            "spill or release requires magnitude context for Low severity"
+        )
+
+def normalize_explanation(
+    finding: dict[str, Any],
+    description: str,
+) -> list[str]:
+    """remove unsupported containment sentences before local validation"""
+    explanation = finding["explanation"]
+
+    if (
+        "contain" not in explanation.casefold()
+        or "contain" in description.casefold()
+    ):
+        return []
+
+    sentences = re.split(r"(?<=[.!?])\s+", explanation)
+    grounded_sentences = [
+        sentence
+        for sentence in sentences
+        if "contain" not in sentence.casefold()
+    ]
+    finding["explanation"] = " ".join(grounded_sentences).strip()
+
+    if not finding["explanation"]:
+        finding["explanation"] = (
+            "The finding is based on the category and severity evidence quoted "
+            "from the incident description."
+        )
+
+    return ["removed_unsupported_containment_claim"]
+
+def normalize_context_dependent_severity(
+    finding: dict[str, Any],
+    description: str,
+) -> list[str]:
+    """avoid low severity when consequence or magnitude is not established"""
+    if finding["suggested_severity"] != "Low":
+        return []
+
+    mechanism = finding["event_mechanism"]
+    lacks_context = mechanism in CONTEXT_DEPENDENT_SEVERITY_MECHANISMS
+
+    if mechanism == "spill_or_release":
+        lacks_context = not has_explicit_evidence(
+            description,
+            SPILL_MAGNITUDE_INDICATORS,
+        )
+
+    if not lacks_context:
+        return []
+
+    finding["suggested_severity"] = "Not assessed"
+    finding["severity_consistency"] = "insufficient_context"
+    finding["severity_evidence_quote"] = None
+
+    if "severity" not in finding["explanation"].casefold():
+        finding["explanation"] = (
+            f"{finding['explanation'].rstrip()} The description does not "
+            "provide enough consequence or magnitude information to assess "
+            "severity."
+        )
+
+    return ["removed_unsupported_low_severity"]
+
+def explanation_asserts_assessed_severity(explanation: str) -> bool:
+    """return whether explanation asserts Low, Medium, or High severity"""
+    normalized_explanation = explanation.casefold()
+
+    return (
+        "severity" in normalized_explanation
+        and any(
+            re.search(rf"\b{severity}\b", normalized_explanation)
+            for severity in ("low", "medium", "high")
+        )
+    )
+
+def normalize_severity_explanation(
+    finding: dict[str, Any],
+) -> list[str]:
+    """align explanation with an insufficient-context severity result"""
+    if finding["suggested_severity"] != "Not assessed":
+        return []
+
+    normalizations: list[str] = []
+    sentences = re.split(r"(?<=[.!?])\s+", finding["explanation"])
+    grounded_sentences = [
+        sentence
+        for sentence in sentences
+        if not explanation_asserts_assessed_severity(sentence)
+    ]
+
+    if grounded_sentences != sentences:
+        finding["explanation"] = " ".join(grounded_sentences).strip()
+        normalizations.append("removed_conflicting_severity_explanation")
+
+    if not has_explicit_evidence(
+        finding["explanation"],
+        INSUFFICIENT_CONTEXT_EXPLANATION_INDICATORS,
+    ):
+        prefix = (
+            f"{finding['explanation'].rstrip()} "
+            if finding["explanation"]
+            else ""
+        )
+        finding["explanation"] = (
+            f"{prefix}The description does not provide enough consequence or "
+            "magnitude information to assess severity."
+        )
+        normalizations.append("added_insufficient_context_explanation")
+
+    return normalizations
+
+def validate_severity_explanation(
+    finding: Mapping[str, Any],
+) -> None:
+    """require explanation to agree with an insufficient-context result"""
+    if finding["suggested_severity"] != "Not assessed":
+        return
+
+    if explanation_asserts_assessed_severity(finding["explanation"]):
+        raise ModelResponseError(
+            "explanation asserts a severity after returning Not assessed"
+        )
+
+    if not has_explicit_evidence(
+        finding["explanation"],
+        INSUFFICIENT_CONTEXT_EXPLANATION_INDICATORS,
+    ):
+        raise ModelResponseError(
+            "insufficient context requires a severity explanation"
+        )
+
+def validate_explanation_grounding(
+    finding: Mapping[str, Any],
+    description: str,
+) -> None:
+    """reject containment claims not stated in the incident description"""
+    explanation = finding["explanation"].casefold()
+    normalized_description = description.casefold()
+
+    if "contain" in explanation and "contain" not in normalized_description:
+        raise ModelResponseError(
+            "explanation claims containment without explicit source evidence"
+        )
+
 def validate_psychosocial_finding(
     finding: Mapping[str, Any],
     description: str,
@@ -321,6 +737,18 @@ def validate_psychosocial_finding(
                     "job demands require explicit evidence in the description"
                 )
 
+        for psychosocial_type, indicators in (
+            PSYCHOSOCIAL_EVIDENCE_INDICATORS.items()
+        ):
+            if (
+                psychosocial_type in psychosocial_types
+                and not has_explicit_evidence(description, indicators)
+            ):
+                raise ModelResponseError(
+                    f"{psychosocial_type} requires explicit evidence in the "
+                    "description"
+                )
+
     if not psychosocial_hazard:
         if psychosocial_types:
             raise ModelResponseError(
@@ -338,9 +766,14 @@ def validate_finding(
 ) -> None:
     """run all local grounding and consistency checks"""
     validate_taxonomy(finding)
+    validate_context_dependent_domains(finding, incident["description"])
+    validate_domain_evidence(finding)
     validate_evidence(finding, incident["description"])
     validate_severity(finding, incident["severity"])
+    validate_severity_grounding(finding, incident["description"])
     validate_psychosocial_finding(finding, incident["description"])
+    validate_explanation_grounding(finding, incident["description"])
+    validate_severity_explanation(finding)
 
 def create_gateway_client(api_key: str, base_url: str) -> Any:
     """create an OpenAI-compatible gateway client"""
@@ -396,13 +829,38 @@ def request_finding(
         raise ModelResponseError("gateway response contained no finding")
 
     finding = parse_finding(message.content)
+    normalizations = normalize_taxonomy(finding)
+    normalizations.extend(
+        normalize_context_dependent_domains(
+            finding,
+            incident["description"],
+        )
+    )
+    normalizations.extend(
+        normalize_explanation(
+            finding,
+            incident["description"],
+        )
+    )
+    normalizations.extend(
+        normalize_context_dependent_severity(
+            finding,
+            incident["description"],
+        )
+    )
+    derive_severity_consistency(finding, incident["severity"])
+    normalizations.extend(normalize_severity_explanation(finding))
     validate_finding(finding, incident)
 
     provenance = {
         "response_id": getattr(completion, "id", None),
         "model": getattr(completion, "model", None) or model,
         "processed_at": datetime.now(timezone.utc).isoformat(),
+        "analysis_version": ANALYSIS_VERSION,
     }
+
+    if normalizations:
+        provenance["normalizations"] = normalizations
 
     return finding, provenance
 
@@ -475,19 +933,31 @@ def analyze_incident(
             if not is_retryable_error(error):
                 raise
 
+            if is_rate_limit_error(error):
+                break
+
             if attempt < max_attempts:
                 delay_seconds = 2 ** (attempt - 1)
+                error_summary = type(error).__name__
+
+                if isinstance(error, ModelResponseError):
+                    error_summary = f"{error_summary}: {error}"
+
                 print(
                     f"{incident['incident_id']}: attempt {attempt} failed "
-                    f"({type(error).__name__}); retrying in {delay_seconds}s",
+                    f"({error_summary}); retrying in {delay_seconds}s",
                     file=sys.stderr,
                 )
                 sleep(delay_seconds)
 
-    raise IncidentAnalysisError(
+    attempt_label = "attempt" if attempt == 1 else "attempts"
+    failure = IncidentAnalysisError(
         f"{incident['incident_id']} failed after "
-        f"{max_attempts} attempts: {last_error}"
-    ) from last_error
+        f"{attempt} {attempt_label}: {last_error}"
+    )
+    failure.attempts = attempt
+
+    raise failure from last_error
 
 def find_incident(
     incidents: Sequence[Mapping[str, Any]],
@@ -594,6 +1064,84 @@ def index_artifacts_by_record_hash(
 
     return indexed_records
 
+def find_stale_finding_hashes(
+    findings_by_hash: Mapping[str, Mapping[str, Any]],
+    incidents_by_hash: Mapping[str, Mapping[str, Any]],
+) -> set[str]:
+    """find saved findings that fail current or cross-record validation"""
+    stale_hashes: set[str] = set()
+    findings_by_description: defaultdict[
+        str,
+        list[tuple[str, str]],
+    ] = defaultdict(list)
+
+    for record_hash, record in findings_by_hash.items():
+        incident = incidents_by_hash.get(record_hash)
+
+        if incident is None:
+            stale_hashes.add(record_hash)
+            continue
+
+        provenance = record.get("provenance")
+
+        if (
+            not isinstance(provenance, Mapping)
+            or provenance.get("analysis_version") != ANALYSIS_VERSION
+        ):
+            stale_hashes.add(record_hash)
+            continue
+
+        try:
+            validate_finding(record["finding"], incident)
+        except (KeyError, ModelResponseError):
+            stale_hashes.add(record_hash)
+
+        findings_by_description[incident["description"]].append(
+            (record_hash, record["finding"]["suggested_severity"])
+        )
+
+    for grouped_findings in findings_by_description.values():
+        suggested_severities = {
+            suggested_severity
+            for _, suggested_severity in grouped_findings
+        }
+
+        if len(suggested_severities) > 1:
+            stale_hashes.update(
+                record_hash for record_hash, _ in grouped_findings
+            )
+
+    return stale_hashes
+
+def reuse_finding_result(
+    reusable_result: Mapping[str, Any],
+    incident: Mapping[str, Any],
+    model: str,
+    input_path: Path,
+) -> dict[str, Any]:
+    """reuse one current finding for an identical incident description"""
+    finding = deepcopy(reusable_result["finding"])
+    derive_severity_consistency(finding, incident["severity"])
+    validate_finding(finding, incident)
+
+    original_provenance = reusable_result["provenance"]
+
+    return {
+        "source": source_metadata(incident, input_path),
+        "finding": finding,
+        "provenance": {
+            "response_id": original_provenance.get("response_id"),
+            "model": original_provenance.get("model") or model,
+            "processed_at": datetime.now(timezone.utc).isoformat(),
+            "attempts": 0,
+            "analysis_version": ANALYSIS_VERSION,
+            "reused_from_record_hash": reusable_result["source"]["record_hash"],
+            "normalizations": list(
+                original_provenance.get("normalizations", [])
+            ),
+        },
+    }
+
 def analyze_all(
     client: Any,
     incidents: Sequence[Mapping[str, Any]],
@@ -622,6 +1170,33 @@ def analyze_all(
     for completed_hash in findings_by_hash:
         failures_by_hash.pop(completed_hash, None)
 
+    incidents_by_hash = {
+        incident["source_record_hash"]: incident
+        for incident in incidents
+    }
+    stale_hashes = find_stale_finding_hashes(
+        findings_by_hash,
+        incidents_by_hash,
+    )
+
+    for stale_hash in stale_hashes:
+        findings_by_hash.pop(stale_hash, None)
+
+    if stale_hashes:
+        print(
+            f"reprocessing {len(stale_hashes)} findings that fail current "
+            "validation",
+            file=sys.stderr,
+        )
+
+    reusable_by_description: dict[str, dict[str, Any]] = {}
+    for saved_result in findings_by_hash.values():
+        provenance = saved_result.get("provenance", {})
+
+        if provenance.get("analysis_version") == ANALYSIS_VERSION:
+            description = saved_result["source"]["description"]
+            reusable_by_description.setdefault(description, saved_result)
+
     pending_incidents = [
         incident
         for incident in incidents
@@ -647,14 +1222,32 @@ def analyze_all(
         )
 
         try:
-            result = analyze_incident(
-                client,
-                incident,
-                model,
-                max_attempts=max_attempts,
-                sleep=sleep,
-                input_path=input_path,
+            reusable_result = reusable_by_description.get(
+                incident["description"]
             )
+
+            if reusable_result is not None:
+                result = reuse_finding_result(
+                    reusable_result,
+                    incident,
+                    model,
+                    input_path,
+                )
+                print(
+                    f"{incident_id}: reused assessment for identical description",
+                    file=sys.stderr,
+                )
+            else:
+                result = analyze_incident(
+                    client,
+                    incident,
+                    model,
+                    max_attempts=max_attempts,
+                    sleep=sleep,
+                    input_path=input_path,
+                )
+                reusable_by_description[incident["description"]] = result
+
             findings_by_hash[record_hash] = result
             failures_by_hash.pop(record_hash, None)
         except Exception as error:
@@ -667,7 +1260,7 @@ def analyze_all(
                 "provenance": {
                     "model": model,
                     "failed_at": datetime.now(timezone.utc).isoformat(),
-                    "attempts": max_attempts,
+                    "attempts": getattr(error, "attempts", max_attempts),
                 },
             }
             print(f"{incident_id}: failed: {error}", file=sys.stderr)
