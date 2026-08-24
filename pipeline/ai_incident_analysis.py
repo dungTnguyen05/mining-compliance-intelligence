@@ -5,6 +5,7 @@ from __future__ import annotations
 import argparse
 import json
 import os
+import re
 import sys
 import time
 from collections import defaultdict
@@ -424,6 +425,35 @@ def validate_severity_grounding(
             "first aid or medical treatment requires at least Medium severity"
         )
 
+def normalize_explanation(
+    finding: dict[str, Any],
+    description: str,
+) -> list[str]:
+    """remove unsupported containment sentences before local validation"""
+    explanation = finding["explanation"]
+
+    if (
+        "contain" not in explanation.casefold()
+        or "contain" in description.casefold()
+    ):
+        return []
+
+    sentences = re.split(r"(?<=[.!?])\s+", explanation)
+    grounded_sentences = [
+        sentence
+        for sentence in sentences
+        if "contain" not in sentence.casefold()
+    ]
+    finding["explanation"] = " ".join(grounded_sentences).strip()
+
+    if not finding["explanation"]:
+        finding["explanation"] = (
+            "The finding is based on the category and severity evidence quoted "
+            "from the incident description."
+        )
+
+    return ["removed_unsupported_containment_claim"]
+
 def validate_explanation_grounding(
     finding: Mapping[str, Any],
     description: str,
@@ -562,6 +592,10 @@ def request_finding(
         raise ModelResponseError("gateway response contained no finding")
 
     finding = parse_finding(message.content)
+    normalizations = normalize_explanation(
+        finding,
+        incident["description"],
+    )
     derive_severity_consistency(finding, incident["severity"])
     validate_finding(finding, incident)
 
@@ -571,6 +605,9 @@ def request_finding(
         "processed_at": datetime.now(timezone.utc).isoformat(),
         "analysis_version": ANALYSIS_VERSION,
     }
+
+    if normalizations:
+        provenance["normalizations"] = normalizations
 
     return finding, provenance
 
@@ -643,6 +680,9 @@ def analyze_incident(
             if not is_retryable_error(error):
                 raise
 
+            if is_rate_limit_error(error):
+                break
+
             if attempt < max_attempts:
                 delay_seconds = 2 ** (attempt - 1)
                 error_summary = type(error).__name__
@@ -657,10 +697,14 @@ def analyze_incident(
                 )
                 sleep(delay_seconds)
 
-    raise IncidentAnalysisError(
+    attempt_label = "attempt" if attempt == 1 else "attempts"
+    failure = IncidentAnalysisError(
         f"{incident['incident_id']} failed after "
-        f"{max_attempts} attempts: {last_error}"
-    ) from last_error
+        f"{attempt} {attempt_label}: {last_error}"
+    )
+    failure.attempts = attempt
+
+    raise failure from last_error
 
 def find_incident(
     incidents: Sequence[Mapping[str, Any]],
@@ -830,6 +874,9 @@ def reuse_finding_result(
             "attempts": 0,
             "analysis_version": ANALYSIS_VERSION,
             "reused_from_record_hash": reusable_result["source"]["record_hash"],
+            "normalizations": list(
+                original_provenance.get("normalizations", [])
+            ),
         },
     }
 
@@ -951,7 +998,7 @@ def analyze_all(
                 "provenance": {
                     "model": model,
                     "failed_at": datetime.now(timezone.utc).isoformat(),
-                    "attempts": max_attempts,
+                    "attempts": getattr(error, "attempts", max_attempts),
                 },
             }
             print(f"{incident_id}: failed: {error}", file=sys.stderr)

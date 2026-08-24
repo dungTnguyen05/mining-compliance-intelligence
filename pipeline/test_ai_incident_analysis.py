@@ -378,6 +378,31 @@ class FindingValidationTests(unittest.TestCase):
         ):
             analysis.validate_finding(finding, incident)
 
+    def test_normalizes_unsupported_containment_sentence(self):
+        finding = make_finding()
+        finding["explanation"] = (
+            "The description reports a hydrocarbon sheen. The event was "
+            "contained because a spill kit was deployed."
+        )
+
+        normalizations = analysis.normalize_explanation(
+            finding,
+            "Hydrocarbon sheen observed, spill kit deployed.",
+        )
+
+        self.assertEqual(
+            finding["explanation"],
+            "The description reports a hydrocarbon sheen.",
+        )
+        self.assertEqual(
+            normalizations,
+            ["removed_unsupported_containment_claim"],
+        )
+        analysis.validate_explanation_grounding(
+            finding,
+            "Hydrocarbon sheen observed, spill kit deployed.",
+        )
+
     def test_rejects_unsupported_containment_claim(self):
         finding = make_finding()
         finding["explanation"] = "The event was contained."
@@ -414,6 +439,33 @@ class RetryTests(unittest.TestCase):
 
         self.assertEqual(result["provenance"]["attempts"], 2)
         self.assertEqual(result["source"]["source_row"], 16)
+
+    def test_stops_immediately_after_rate_limit(self):
+        class RateLimitError(Exception):
+            status_code = 429
+
+        sleep_delays = []
+
+        with patch.object(
+            analysis,
+            "request_finding",
+            side_effect=RateLimitError("limited"),
+        ) as request:
+            with self.assertRaisesRegex(
+                analysis.IncidentAnalysisError,
+                "failed after 1 attempt",
+            ) as raised:
+                analysis.analyze_incident(
+                    object(),
+                    make_incident(),
+                    "test-model",
+                    sleep=sleep_delays.append,
+                )
+
+        self.assertEqual(request.call_count, 1)
+        self.assertEqual(sleep_delays, [])
+        self.assertEqual(raised.exception.attempts, 1)
+        self.assertTrue(analysis.is_rate_limit_error(raised.exception))
 
     def test_does_not_retry_configuration_error(self):
         with patch.object(
