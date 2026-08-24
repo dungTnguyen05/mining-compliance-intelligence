@@ -17,6 +17,7 @@ from clean_data import (
 from incident_source import add_incident_source_identity
 from validate_data import (
     validate_incident_register,
+    validate_reporting_periods,
     validate_suppliers,
 )
 
@@ -276,7 +277,14 @@ def insert_suppliers(connection, suppliers):
     connection.commit()
 
 # insert data quality issues
-def insert_data_quality_issues(connection, incident_register, suppliers, data_quality_events):
+def insert_data_quality_issues(
+    connection,
+    electricity,
+    fuel_deliveries,
+    incident_register,
+    suppliers,
+    data_quality_events,
+):
     # merge fixed corrections with unresolved flagged issues
     issues = data_quality_events.copy()
 
@@ -291,6 +299,17 @@ def insert_data_quality_issues(connection, incident_register, suppliers, data_qu
         if issue.get("action") == "flagged":
             issues.append({
                 "dataset": "suppliers",
+                **issue,
+            })
+
+    for issue in validate_reporting_periods(
+        electricity,
+        fuel_deliveries,
+        incident_register,
+    ):
+        if issue.get("action") == "flagged":
+            issues.append({
+                "dataset": "fuel_deliveries",
                 **issue,
             })
 
@@ -356,7 +375,14 @@ def main():
         insert_suppliers(connection, suppliers)
 
         # insert fixed and unresolved data quality issues
-        insert_data_quality_issues(connection, incident_register, suppliers, data_quality_events)
+        insert_data_quality_issues(
+            connection,
+            electricity,
+            fuel_deliveries,
+            incident_register,
+            suppliers,
+            data_quality_events,
+        )
 
         print("Data loaded successfully.")
 

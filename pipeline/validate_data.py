@@ -671,6 +671,36 @@ def validate_reporting_periods(electricity_meter_readings, fuel_deliveries, inci
             "count": int(fuel_outside_period.sum()),
         })
 
+    # flag reporting months with electricity activity but no fuel records
+    expected_months = pd.period_range(
+        start=start_date,
+        end=end_date,
+        freq="M",
+    )
+    fuel_months = set(
+        fuel_deliveries.loc[
+            fuel_deliveries["delivery_date"].notna(),
+            "delivery_date",
+        ].dt.to_period("M")
+    )
+    missing_fuel_months = [
+        str(month)
+        for month in expected_months
+        if month not in fuel_months
+    ]
+
+    if missing_fuel_months:
+        issues.append({
+            "issue": "missing fuel delivery month",
+            "action": "flagged",
+            "record_key": ",".join(missing_fuel_months),
+            "count": len(missing_fuel_months),
+            "months": missing_fuel_months,
+            "reason": (
+                "missing fuel records cannot be treated as zero Scope 1 emissions"
+            ),
+        })
+
     # check incident dates against reporting period
     incidents_outside_period = (
         incident_register["incident_date"].notna()

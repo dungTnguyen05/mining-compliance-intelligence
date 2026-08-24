@@ -9,7 +9,8 @@ vi.mock(
                 month: "2025-01",
                 scope1KgCO2e: 100,
                 scope2KgCO2e: 50,
-                totalKgCO2e: 150
+                totalKgCO2e: 150,
+                missingScopes: []
             }
         ])
     })
@@ -30,7 +31,8 @@ describe("GET /api/emissions/monthly", () => {
                     month: "2025-01",
                     scope1KgCO2e: 100,
                     scope2KgCO2e: 50,
-                    totalKgCO2e: 150
+                    totalKgCO2e: 150,
+                    missingScopes: []
                 }
             ]
         });

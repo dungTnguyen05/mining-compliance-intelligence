@@ -1,8 +1,9 @@
 export interface MonthlyEmission {
   month: string
-  scope1KgCO2e: number
-  scope2KgCO2e: number
-  totalKgCO2e: number
+  scope1KgCO2e: number | null
+  scope2KgCO2e: number | null
+  totalKgCO2e: number | null
+  missingScopes: number[]
 }
 
 export interface IncidentTypeCount {

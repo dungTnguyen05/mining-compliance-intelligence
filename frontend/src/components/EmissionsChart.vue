@@ -42,7 +42,7 @@ const maxValue = computed(() => {
     ...props.data.flatMap((item) => [
       item.scope1KgCO2e,
       item.scope2KgCO2e,
-    ]),
+    ].map((value) => value ?? 0)),
     1,
   )
 
@@ -74,7 +74,11 @@ function xPosition(index: number, offset: number): number {
   return groupCenter + offset
 }
 
-function barHeight(value: number): number {
+function barHeight(value: number | null): number {
+  if (value === null) {
+    return 0
+  }
+
   return (value / maxValue.value) * plotHeight
 }
 
@@ -102,7 +106,11 @@ function formatMonth(month: string): string {
   return `${labels[Number(monthNumber) - 1]} ${year.slice(2)}`
 }
 
-function formatTonnes(value: number): string {
+function formatTonnes(value: number | null): string {
+  if (value === null) {
+    return 'Missing'
+  }
+
   return new Intl.NumberFormat('en-AU', {
     maximumFractionDigits: 0,
   }).format(value / 1_000)
@@ -116,7 +124,17 @@ function hideTooltip(): void {
 }
 
 function emissionAriaLabel(item: MonthlyEmission): string {
-  return `${formatMonth(item.month)}, Scope 1 ${formatTonnes(item.scope1KgCO2e)} tonnes CO2e, Scope 2 ${formatTonnes(item.scope2KgCO2e)} tonnes CO2e, total ${formatTonnes(item.totalKgCO2e)} tonnes CO2e`
+  const scope1 = item.scope1KgCO2e === null
+    ? 'Scope 1 data missing'
+    : `Scope 1 ${formatTonnes(item.scope1KgCO2e)} tonnes CO2e`
+  const scope2 = item.scope2KgCO2e === null
+    ? 'Scope 2 data missing'
+    : `Scope 2 ${formatTonnes(item.scope2KgCO2e)} tonnes CO2e`
+  const total = item.totalKgCO2e === null
+    ? 'monthly total unavailable'
+    : `total ${formatTonnes(item.totalKgCO2e)} tonnes CO2e`
+
+  return `${formatMonth(item.month)}, ${scope1}, ${scope2}, ${total}`
 }
 
 </script>
@@ -161,6 +179,7 @@ function emissionAriaLabel(item: MonthlyEmission): string {
         @click="showTooltip(index)"
       >
         <rect
+          v-if="item.scope1KgCO2e !== null"
           :x="xPosition(index, -barWidth - 1)"
           :y="plotTop + plotHeight - barHeight(item.scope1KgCO2e)"
           :width="barWidth"
@@ -170,6 +189,7 @@ function emissionAriaLabel(item: MonthlyEmission): string {
         >
         </rect>
         <rect
+          v-if="item.scope2KgCO2e !== null"
           :x="xPosition(index, 1)"
           :y="plotTop + plotHeight - barHeight(item.scope2KgCO2e)"
           :width="barWidth"
@@ -184,7 +204,7 @@ function emissionAriaLabel(item: MonthlyEmission): string {
           :y="height - 18"
           class="axis-label axis-label-x"
         >
-          {{ formatMonth(item.month) }}
+          {{ formatMonth(item.month) }}{{ item.missingScopes.length ? '*' : '' }}
         </text>
       </g>
       <g
@@ -199,15 +219,15 @@ function emissionAriaLabel(item: MonthlyEmission): string {
         </text>
         <text x="12" y="38" class="svg-tooltip-label">Scope 1</text>
         <text x="178" y="38" class="svg-tooltip-value">
-          {{ formatTonnes(activeItem.scope1KgCO2e) }} t CO2e
+          {{ formatTonnes(activeItem.scope1KgCO2e) }}{{ activeItem.scope1KgCO2e === null ? '' : ' t CO2e' }}
         </text>
         <text x="12" y="54" class="svg-tooltip-label">Scope 2</text>
         <text x="178" y="54" class="svg-tooltip-value">
-          {{ formatTonnes(activeItem.scope2KgCO2e) }} t CO2e
+          {{ formatTonnes(activeItem.scope2KgCO2e) }}{{ activeItem.scope2KgCO2e === null ? '' : ' t CO2e' }}
         </text>
         <text x="12" y="70" class="svg-tooltip-label">Total</text>
         <text x="178" y="70" class="svg-tooltip-value total">
-          {{ formatTonnes(activeItem.totalKgCO2e) }} t CO2e
+          {{ formatTonnes(activeItem.totalKgCO2e) }}{{ activeItem.totalKgCO2e === null ? '' : ' t CO2e' }}
         </text>
       </g>
 
@@ -217,6 +237,7 @@ function emissionAriaLabel(item: MonthlyEmission): string {
       <span><i class="legend-swatch scope-1"></i>Scope 1</span>
       <span><i class="legend-swatch scope-2"></i>Scope 2</span>
       <span class="legend-unit">tonnes CO2e</span>
+      <span class="legend-unit">* incomplete month</span>
     </div>
   </div>
 </template>
