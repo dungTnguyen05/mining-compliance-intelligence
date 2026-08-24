@@ -56,6 +56,7 @@ def clear_existing_data(connection):
                 electricity_meters,
                 emission_factors,
                 fuel_deliveries,
+                incident_ai_findings,
                 incidents,
                 suppliers
             RESTART IDENTITY CASCADE
