@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, onMounted, ref } from 'vue'
+import { computed, onBeforeUnmount, onMounted, ref } from 'vue'
 
 import { getDashboardData } from './api'
 import EmissionsChart from './components/EmissionsChart.vue'
@@ -14,6 +14,11 @@ const dashboard = ref<DashboardData | null>(null)
 const loading = ref(true)
 const errorMessage = ref('')
 const lastUpdated = ref<Date | null>(null)
+
+type SectionId = 'overview' | 'operations' | 'attention'
+
+const activeSection = ref<SectionId>('overview')
+let sectionObserver: IntersectionObserver | null = null
 
 // derive decision-ready metrics from the API responses
 const totalEmissionsTonnes = computed(() => {
@@ -193,7 +198,31 @@ function qualityIssueDescription(issue: DataQualityIssue): string {
   return formatLabel(issue.issueType)
 }
 
-onMounted(loadDashboard)
+onMounted(() => {
+  loadDashboard()
+
+  const sections = document.querySelectorAll<HTMLElement>('[data-nav-section]')
+
+  sectionObserver = new IntersectionObserver(
+    (entries) => {
+      const visibleSection = entries
+        .filter((entry) => entry.isIntersecting)
+        .sort((first, second) => second.intersectionRatio - first.intersectionRatio)[0]
+
+      if (visibleSection) {
+        activeSection.value = visibleSection.target.id as SectionId
+      }
+    },
+    {
+      rootMargin: '-96px 0px -55% 0px',
+      threshold: [0, 0.1, 0.25, 0.5],
+    },
+  )
+
+  sections.forEach((section) => sectionObserver?.observe(section))
+})
+
+onBeforeUnmount(() => sectionObserver?.disconnect())
 </script>
 
 <template>
@@ -211,9 +240,30 @@ onMounted(loadDashboard)
       </a>
 
       <nav class="topnav" aria-label="dashboard sections">
-        <a href="#overview">Overview</a>
-        <a href="#operations">Operations</a>
-        <a href="#attention">Attention</a>
+        <a
+          href="#overview"
+          :class="{ active: activeSection === 'overview' }"
+          :aria-current="activeSection === 'overview' ? 'location' : undefined"
+          @click="activeSection = 'overview'"
+        >
+          Site overview
+        </a>
+        <a
+          href="#operations"
+          :class="{ active: activeSection === 'operations' }"
+          :aria-current="activeSection === 'operations' ? 'location' : undefined"
+          @click="activeSection = 'operations'"
+        >
+          Performance
+        </a>
+        <a
+          href="#attention"
+          :class="{ active: activeSection === 'attention' }"
+          :aria-current="activeSection === 'attention' ? 'location' : undefined"
+          @click="activeSection = 'attention'"
+        >
+          Review queue
+        </a>
       </nav>
 
       <button
@@ -244,7 +294,7 @@ onMounted(loadDashboard)
     </header>
 
     <main>
-      <section id="overview" class="page-intro">
+      <section id="overview" class="page-intro" data-nav-section>
         <div>
           <p class="eyebrow">Sustainability command view</p>
           <h1>Operational risk, without the noise</h1>
@@ -334,7 +384,7 @@ onMounted(loadDashboard)
           </article>
         </section>
 
-        <section id="operations" class="dashboard-grid">
+        <section id="operations" class="dashboard-grid" data-nav-section>
           <article class="panel emissions-panel">
             <header class="panel-header">
               <div>
@@ -398,7 +448,7 @@ onMounted(loadDashboard)
           </article>
         </section>
 
-        <section id="attention" class="attention-grid">
+        <section id="attention" class="attention-grid" data-nav-section>
           <article class="panel attention-panel">
             <header class="panel-header">
               <div>
