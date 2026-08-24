@@ -43,8 +43,17 @@ CREATE TABLE IF NOT EXISTS incidents (
     location VARCHAR(100) NOT NULL,
     type_code VARCHAR(20) NOT NULL,
     severity VARCHAR(20) NOT NULL,
-    description TEXT NOT NULL
+    description TEXT NOT NULL,
+    source_row INTEGER NOT NULL,
+    source_record_hash VARCHAR(64) NOT NULL
 );
+
+ALTER TABLE incidents
+    ADD COLUMN IF NOT EXISTS source_row INTEGER,
+    ADD COLUMN IF NOT EXISTS source_record_hash VARCHAR(64);
+
+CREATE UNIQUE INDEX IF NOT EXISTS uq_incidents_source_record_hash
+    ON incidents(source_record_hash);
 
 CREATE TABLE IF NOT EXISTS suppliers (
     id BIGSERIAL PRIMARY KEY,

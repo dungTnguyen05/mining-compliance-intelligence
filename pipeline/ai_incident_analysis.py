@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import argparse
-import hashlib
 import json
 import os
 import sys
@@ -23,20 +22,18 @@ from ai_schema import (
 )
 from ai_taxonomy import EVENT_MECHANISMS, HAZARD_DOMAINS
 from clean_data import clean_incident_register
+from incident_source import (
+    INCIDENT_SOURCE_FIELDS,
+    add_incident_source_identity,
+    hash_source_record,
+)
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
 DEFAULT_INPUT_PATH = PROJECT_ROOT/"data"/"raw"/"incident_register.csv"
 DEFAULT_OUTPUT_PATH = PROJECT_ROOT/"data"/"processed"/"incident_ai_findings.jsonl"
 DEFAULT_FAILURES_PATH = PROJECT_ROOT/"data"/"processed"/"incident_ai_failures.jsonl"
 DEFAULT_TEST_INCIDENT_ID = "INC-2025-127"
-SOURCE_FIELDS = (
-    "incident_id",
-    "incident_date",
-    "location",
-    "type_code",
-    "severity",
-    "description",
-)
+SOURCE_FIELDS = INCIDENT_SOURCE_FIELDS
 
 JOB_DEMAND_INDICATORS = (
     "workload",
@@ -132,36 +129,12 @@ def load_ai_configuration() -> tuple[str, str, str]:
         get_required_environment("AI_MODEL"),
     )
 
-def hash_source_record(
-    record: Mapping[str, Any],
-    columns: Sequence[str] = SOURCE_FIELDS,
-) -> str:
-    """return a stable SHA-256 hash of raw source values"""
-    source_values = {
-        column: None if pd.isna(record[column]) else str(record[column])
-        for column in columns
-    }
-    canonical_record = json.dumps(
-        source_values,
-        ensure_ascii=False,
-        sort_keys=True,
-        separators=(",", ":"),
-    )
-
-    return hashlib.sha256(canonical_record.encode("utf-8")).hexdigest()
-
 def load_incidents(path: Path = DEFAULT_INPUT_PATH) -> list[dict[str, Any]]:
     """read and clean incidents while preserving raw source identity"""
     raw_incidents = pd.read_csv(path, dtype=str, keep_default_na=False)
-    source_columns = list(raw_incidents.columns)
+    identified_incidents = add_incident_source_identity(raw_incidents)
 
-    raw_incidents["source_row"] = range(2, len(raw_incidents) + 2)
-    raw_incidents["source_record_hash"] = raw_incidents.apply(
-        lambda row: hash_source_record(row, source_columns),
-        axis=1,
-    )
-
-    cleaned_incidents, _ = clean_incident_register(raw_incidents)
+    cleaned_incidents, _ = clean_incident_register(identified_incidents)
 
     missing_columns = set(SOURCE_FIELDS) - set(cleaned_incidents.columns)
     if missing_columns:
