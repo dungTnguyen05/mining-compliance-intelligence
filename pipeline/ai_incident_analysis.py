@@ -37,7 +37,7 @@ DEFAULT_OUTPUT_PATH = PROJECT_ROOT/"data"/"processed"/"incident_ai_findings.json
 DEFAULT_FAILURES_PATH = PROJECT_ROOT/"data"/"processed"/"incident_ai_failures.jsonl"
 DEFAULT_TEST_INCIDENT_ID = "INC-2025-127"
 SOURCE_FIELDS = INCIDENT_SOURCE_FIELDS
-ANALYSIS_VERSION = 2
+ANALYSIS_VERSION = 3
 
 DOMAIN_EVIDENCE_INDICATORS = {
     "electrical": (
@@ -96,6 +96,24 @@ PSYCHOSOCIAL_EVIDENCE_INDICATORS = {
 MINIMUM_MEDIUM_SEVERITY_INDICATORS = (
     "first aid",
     "medical treatment",
+)
+
+CONTEXT_DEPENDENT_SEVERITY_MECHANISMS = {
+    "dust_exceedance",
+    "dropped_object",
+    "environmental_threshold_exceedance",
+    "unsafe_vehicle_interaction",
+}
+
+SPILL_MAGNITUDE_INDICATORS = (
+    "minor",
+    "litre",
+    "liter",
+    "contained",
+    "off site",
+    "off-site",
+    "waterway",
+    "environmental harm",
 )
 
 JOB_DEMAND_INDICATORS = (
@@ -161,6 +179,18 @@ Use this severity guide:
 - High: fracture, hospitalization, surgery, lost-time injury, serious injury,
   major disruption, or a clearly described high-potential event.
 First aid or medical treatment can never be assessed as Low.
+
+Do not treat missing injury or damage details as proof that an event was Low.
+Use insufficient_context when the description does not establish the event's
+actual or credible potential consequence. This especially applies to exposure
+or environmental threshold exceedances, unsafe vehicle interactions, dropped
+objects, and releases with no stated magnitude or impact. A site-wide power
+loss lasting days or weeks is a major disruption and supports High severity.
+
+Use environmental_threshold_exceedance when an environmental control or
+monitoring trigger is exceeded without an explicitly described spill or
+release. Use occupational_health for exposure or illness hazards, not merely
+as a secondary domain for an acute traumatic injury.
 
 Assess suggested_severity only from the description. When a severity can be
 assessed, set severity_consistency to consistent as a placeholder. Local code
@@ -324,6 +354,26 @@ def validate_taxonomy(finding: Mapping[str, Any]) -> None:
             "other cannot be used as a secondary hazard domain"
         )
 
+def normalize_taxonomy(finding: dict[str, Any]) -> list[str]:
+    """repair secondary domains that cannot add useful classification"""
+    secondary_domains = finding["secondary_hazard_domains"]
+    normalized_domains = list(dict.fromkeys(secondary_domains))
+    primary_domain = finding["primary_hazard_domain"]
+    normalizations: list[str] = []
+
+    if "other" in normalized_domains:
+        normalized_domains.remove("other")
+        normalizations.append("removed_other_secondary_domain")
+
+    if primary_domain in normalized_domains:
+        normalized_domains.remove(primary_domain)
+        normalizations.append("removed_duplicate_primary_domain")
+
+    if normalized_domains != secondary_domains:
+        finding["secondary_hazard_domains"] = normalized_domains
+
+    return normalizations
+
 def validate_domain_evidence(finding: Mapping[str, Any]) -> None:
     """require supported domains to appear in the category evidence quote"""
     category_quote = finding["category_evidence_quote"]
@@ -453,6 +503,39 @@ def normalize_explanation(
         )
 
     return ["removed_unsupported_containment_claim"]
+
+def normalize_context_dependent_severity(
+    finding: dict[str, Any],
+    description: str,
+) -> list[str]:
+    """avoid low severity when consequence or magnitude is not established"""
+    if finding["suggested_severity"] != "Low":
+        return []
+
+    mechanism = finding["event_mechanism"]
+    lacks_context = mechanism in CONTEXT_DEPENDENT_SEVERITY_MECHANISMS
+
+    if mechanism == "spill_or_release":
+        lacks_context = not has_explicit_evidence(
+            description,
+            SPILL_MAGNITUDE_INDICATORS,
+        )
+
+    if not lacks_context:
+        return []
+
+    finding["suggested_severity"] = "Not assessed"
+    finding["severity_consistency"] = "insufficient_context"
+    finding["severity_evidence_quote"] = None
+
+    if "severity" not in finding["explanation"].casefold():
+        finding["explanation"] = (
+            f"{finding['explanation'].rstrip()} The description does not "
+            "provide enough consequence or magnitude information to assess "
+            "severity."
+        )
+
+    return ["removed_unsupported_low_severity"]
 
 def validate_explanation_grounding(
     finding: Mapping[str, Any],
@@ -592,9 +675,18 @@ def request_finding(
         raise ModelResponseError("gateway response contained no finding")
 
     finding = parse_finding(message.content)
-    normalizations = normalize_explanation(
-        finding,
-        incident["description"],
+    normalizations = normalize_taxonomy(finding)
+    normalizations.extend(
+        normalize_explanation(
+            finding,
+            incident["description"],
+        )
+    )
+    normalizations.extend(
+        normalize_context_dependent_severity(
+            finding,
+            incident["description"],
+        )
     )
     derive_severity_consistency(finding, incident["severity"])
     validate_finding(finding, incident)
@@ -826,6 +918,15 @@ def find_stale_finding_hashes(
         incident = incidents_by_hash.get(record_hash)
 
         if incident is None:
+            stale_hashes.add(record_hash)
+            continue
+
+        provenance = record.get("provenance")
+
+        if (
+            not isinstance(provenance, Mapping)
+            or provenance.get("analysis_version") != ANALYSIS_VERSION
+        ):
             stale_hashes.add(record_hash)
             continue
 

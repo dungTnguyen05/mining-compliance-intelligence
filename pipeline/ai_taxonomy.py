@@ -22,6 +22,7 @@ EVENT_MECHANISMS = (
     "slip_or_trip",
     "fall_from_height",
     "spill_or_release",
+    "environmental_threshold_exceedance",
     "caught_in_pinch_point",
     "dropped_object",
     "power_supply_failure",

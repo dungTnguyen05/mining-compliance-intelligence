@@ -119,6 +119,15 @@ class PromptTests(unittest.TestCase):
             analysis.SYSTEM_PROMPT,
         )
 
+        self.assertIn(
+            "Do not treat missing injury or damage details as proof",
+            analysis.SYSTEM_PROMPT,
+        )
+        self.assertIn(
+            "environmental_threshold_exceedance",
+            analysis.EVENT_MECHANISMS,
+        )
+
 class FindingValidationTests(unittest.TestCase):
     def test_accepts_grounded_psychosocial_finding(self):
         incident = make_incident()
@@ -347,6 +356,46 @@ class FindingValidationTests(unittest.TestCase):
             "other cannot be used as a secondary",
         ):
             analysis.validate_finding(finding, make_incident())
+
+    def test_normalizes_other_as_secondary_domain(self):
+        finding = make_finding()
+        finding["secondary_hazard_domains"] = ["other"]
+
+        normalizations = analysis.normalize_taxonomy(finding)
+
+        self.assertEqual(finding["secondary_hazard_domains"], [])
+        self.assertEqual(
+            normalizations,
+            ["removed_other_secondary_domain"],
+        )
+
+    def test_does_not_assume_low_for_dust_exceedance(self):
+        finding = make_finding()
+        finding.update(
+            {
+                "event_mechanism": "dust_exceedance",
+                "severity_consistency": "consistent",
+                "suggested_severity": "Low",
+                "severity_evidence_quote": "Dust exceedance recorded",
+                "explanation": "The record describes a dust exceedance.",
+            }
+        )
+
+        normalizations = analysis.normalize_context_dependent_severity(
+            finding,
+            "Dust exceedance recorded at crusher, fogger offline.",
+        )
+
+        self.assertEqual(finding["suggested_severity"], "Not assessed")
+        self.assertEqual(
+            finding["severity_consistency"],
+            "insufficient_context",
+        )
+        self.assertIsNone(finding["severity_evidence_quote"])
+        self.assertEqual(
+            normalizations,
+            ["removed_unsupported_low_severity"],
+        )
 
     def test_rejects_low_severity_when_first_aid_is_reported(self):
         incident = make_incident()
@@ -595,6 +644,18 @@ class BatchResumeTests(unittest.TestCase):
             stale_hashes,
             {first["source_record_hash"], second["source_record_hash"]},
         )
+
+    def test_marks_missing_analysis_version_as_stale(self):
+        incident = self.make_distinct_incident("INC-1", "a" * 64)
+        result = self.make_result(incident)
+        result["provenance"].pop("analysis_version")
+
+        stale_hashes = analysis.find_stale_finding_hashes(
+            {incident["source_record_hash"]: result},
+            {incident["source_record_hash"]: incident},
+        )
+
+        self.assertEqual(stale_hashes, {incident["source_record_hash"]})
 
     def test_reuses_one_assessment_for_identical_descriptions(self):
         first = self.make_distinct_incident("INC-1", "a" * 64)
