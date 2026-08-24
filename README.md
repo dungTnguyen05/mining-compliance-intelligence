@@ -139,6 +139,31 @@ npm run dev
 
 Open http://localhost:5173. Vite proxies /api requests to the backend on port 3000 during development.
 
+## Deployment
+
+The hosted application uses Railway for PostgreSQL and the API, and Vercel for the Vue frontend.
+
+Configure the Railway API service with root directory backend/, build command npm ci && npm run build, start command npm start, and health check /health. Reference the private PostgreSQL service variables:
+
+~~~dotenv
+DB_HOST=${{Postgres.PGHOST}}
+DB_PORT=${{Postgres.PGPORT}}
+DB_NAME=${{Postgres.PGDATABASE}}
+DB_USER=${{Postgres.PGUSER}}
+DB_PASSWORD=${{Postgres.PGPASSWORD}}
+ALLOWED_ORIGINS=https://your-project.vercel.app
+~~~
+
+Railway supplies PORT automatically. The API prefers this deployment value and falls back to API_PORT for local development.
+
+Configure the Vercel project with root directory frontend/ and:
+
+~~~dotenv
+VITE_API_BASE_URL=https://your-api.up.railway.app
+~~~
+
+Do not include a trailing slash in either public URL. Add preview domains to ALLOWED_ORIGINS as a comma-separated list only when they need API access.
+
 ## AI regeneration
 
 Regeneration is optional because the reviewed JSONL output is committed.
