@@ -97,6 +97,17 @@ class IncidentLoadingTests(unittest.TestCase):
             },
         )
 
+class PromptTests(unittest.TestCase):
+    def test_defines_severity_field_relationships(self):
+        self.assertIn(
+            "suggested_severity must equal the\n  recorded severity",
+            analysis.SYSTEM_PROMPT,
+        )
+        self.assertIn(
+            "suggested_severity must\n  differ from the recorded severity",
+            analysis.SYSTEM_PROMPT,
+        )
+
 class FindingValidationTests(unittest.TestCase):
     def test_accepts_grounded_psychosocial_finding(self):
         incident = make_incident()

@@ -88,6 +88,12 @@ Use this severity guide:
 - High: fracture, hospitalization, surgery, lost-time injury, serious injury,
   major disruption, or a clearly described high-potential event.
 
+Keep the severity fields internally consistent:
+- When severity_consistency is consistent, suggested_severity must equal the
+  recorded severity.
+- When severity_consistency is appears_inconsistent, suggested_severity must
+  differ from the recorded severity.
+
 Do not invent injuries, causes, diagnoses, intent, consequences, or legal
 conclusions.
 
