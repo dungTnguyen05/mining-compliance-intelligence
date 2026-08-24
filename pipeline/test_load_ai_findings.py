@@ -35,7 +35,10 @@ def make_artifact() -> dict:
             "suggested_severity": "Not assessed",
             "category_evidence_quote": "excessive workload",
             "severity_evidence_quote": None,
-            "explanation": "Explicit workload pressure is described.",
+            "explanation": (
+                "Explicit workload pressure is described. The description does "
+                "not provide enough information to assess severity."
+            ),
         },
         "provenance": {
             "response_id": "response-1",
@@ -56,6 +59,24 @@ class FindingLoaderTests(unittest.TestCase):
         self.assertEqual(parameters["source_record_hash"], "a" * 64)
         self.assertEqual(parameters["psychosocial_types"], ["job_demands"])
         self.assertEqual(parameters["model"], "test-model")
+
+    def test_accepts_reused_finding_with_zero_attempts(self):
+        artifact = make_artifact()
+        artifact["provenance"]["attempts"] = 0
+
+        parameters = loader.prepare_finding_parameters(artifact, 1)
+
+        self.assertEqual(parameters["attempts"], 0)
+
+    def test_rejects_negative_attempts(self):
+        artifact = make_artifact()
+        artifact["provenance"]["attempts"] = -1
+
+        with self.assertRaisesRegex(
+            IncidentAnalysisError,
+            "cannot have negative attempts",
+        ):
+            loader.prepare_finding_parameters(artifact, 1)
 
     def test_rejects_ungrounded_artifact(self):
         artifact = make_artifact()

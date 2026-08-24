@@ -91,8 +91,16 @@ CREATE TABLE IF NOT EXISTS incident_ai_findings (
             'Not assessed'
         )
     ),
-    CHECK (attempts > 0)
+    CONSTRAINT incident_ai_findings_attempts_check
+        CHECK (attempts >= 0)
 );
+
+ALTER TABLE incident_ai_findings
+    DROP CONSTRAINT IF EXISTS incident_ai_findings_attempts_check;
+
+ALTER TABLE incident_ai_findings
+    ADD CONSTRAINT incident_ai_findings_attempts_check
+    CHECK (attempts >= 0);
 
 CREATE TABLE IF NOT EXISTS suppliers (
     id BIGSERIAL PRIMARY KEY,
