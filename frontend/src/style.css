@@ -689,17 +689,16 @@ h1 {
   font-size: 0.61rem;
 }
 
-.finding-meta span:not(:last-child)::after {
-  margin-left: 9px;
+.finding-meta > span + span::before {
+  margin-right: 9px;
   color: #bdc4bf;
   content: "\00b7";
 }
 
-.finding-meta .finding-badge::after {
-  content: none;
-}
-
 .finding-badge {
+  display: inline-flex;
+  align-items: center;
+  width: fit-content;
   padding: 4px 7px;
   color: #42645a;
   background: #e0ebe4;

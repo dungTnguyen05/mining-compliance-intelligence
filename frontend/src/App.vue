@@ -133,10 +133,37 @@ function formatTimestamp(date: Date): string {
   }).format(date)
 }
 
+const ACRONYM_LABELS: Record<string, string> = {
+  abn: 'ABN',
+  ai: 'AI',
+  api: 'API',
+  co2e: 'CO2e',
+  id: 'ID',
+  ivms: 'IVMS',
+  lti: 'LTI',
+  lv: 'LV',
+  rpe: 'RPE',
+}
+
 function formatLabel(value: string): string {
   return value
     .replaceAll('_', ' ')
-    .replace(/\b\w/g, (letter) => letter.toUpperCase())
+    .split(' ')
+    .map((word) => {
+      const normalizedWord = word.toLowerCase()
+
+      return (
+        ACRONYM_LABELS[normalizedWord] ??
+        `${normalizedWord.charAt(0).toUpperCase()}${normalizedWord.slice(1)}`
+      )
+    })
+    .join(' ')
+}
+
+function formatAcronyms(value: string): string {
+  return value.replace(/\b(abn|ai|api|id|ivms|lti|lv|rpe)\b/gi, (word) =>
+    ACRONYM_LABELS[word.toLowerCase()] ?? word,
+  )
 }
 
 function findingStatus(finding: IncidentAiFinding): string {
@@ -151,7 +178,7 @@ function qualityIssueDescription(issue: DataQualityIssue): string {
   const detail = issue.details.details
 
   if (typeof detail === 'string') {
-    return detail
+    return formatAcronyms(detail)
   }
 
   if (
@@ -160,7 +187,7 @@ function qualityIssueDescription(issue: DataQualityIssue): string {
     'reason' in detail &&
     typeof detail.reason === 'string'
   ) {
-    return detail.reason
+    return formatAcronyms(detail.reason)
   }
 
   return formatLabel(issue.issueType)
