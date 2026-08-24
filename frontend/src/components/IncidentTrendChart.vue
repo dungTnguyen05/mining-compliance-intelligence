@@ -1,11 +1,31 @@
 <script setup lang="ts">
-import { computed } from 'vue'
+import { computed, ref } from 'vue'
 
 import type { IncidentTrend } from '../types'
 
 const props = defineProps<{
   data: IncidentTrend[]
 }>()
+
+const activeIndex = ref<number | null>(null)
+
+const activeItem = computed(() => {
+  if (activeIndex.value === null) {
+    return null
+  }
+
+  return props.data[activeIndex.value] ?? null
+})
+
+const tooltipX = computed(() => {
+  if (activeIndex.value === null) {
+    return 0
+  }
+
+  const center = xPosition(activeIndex.value) + barWidth.value / 2
+
+  return Math.min(Math.max(center - 85, 4), width - 174)
+})
 
 // use one coordinate system so the SVG scales responsively
 const width = 760
@@ -81,10 +101,22 @@ function formatMonth(month: string): string {
 
   return `${labels[Number(monthNumber) - 1]} ${year.slice(2)}`
 }
+function showTooltip(index: number): void {
+  activeIndex.value = index
+}
+
+function hideTooltip(): void {
+  activeIndex.value = null
+}
+
+function incidentAriaLabel(item: IncidentTrend): string {
+  return `${formatMonth(item.month)}, ${item.totalIncidents} total incidents, ${severityCount(item, 'Low')} Low, ${severityCount(item, 'Medium')} Medium, ${severityCount(item, 'High')} High`
+}
+
 </script>
 
 <template>
-  <div class="chart-wrap">
+  <div class="chart-wrap interactive-chart">
     <svg
       class="chart"
       :viewBox="`0 0 ${width} ${height}`"
@@ -99,7 +131,20 @@ function formatMonth(month: string): string {
         class="grid-line baseline"
       />
 
-      <g v-for="(trend, index) in data" :key="trend.month">
+      <g
+        v-for="(trend, index) in data"
+        :key="trend.month"
+        class="chart-group"
+        :class="{ active: activeIndex === index }"
+        tabindex="0"
+        role="img"
+        :aria-label="incidentAriaLabel(trend)"
+        @mouseenter="showTooltip(index)"
+        @mouseleave="hideTooltip"
+        @focus="showTooltip(index)"
+        @blur="hideTooltip"
+        @click="showTooltip(index)"
+      >
         <rect
           v-for="severity in severityOrder"
           :key="severity"
@@ -109,10 +154,6 @@ function formatMonth(month: string): string {
           :height="segmentHeight(severityCount(trend, severity))"
           :class="`incident-bar severity-${severity.toLowerCase()}`"
         >
-          <title>
-            {{ formatMonth(trend.month) }} {{ severity }}:
-            {{ severityCount(trend, severity) }}
-          </title>
         </rect>
         <text
           :x="xPosition(index) + barWidth / 2"
@@ -130,6 +171,34 @@ function formatMonth(month: string): string {
           {{ formatMonth(trend.month) }}
         </text>
       </g>
+      <g
+        v-if="activeItem"
+        :transform="`translate(${tooltipX}, 8)`"
+        class="svg-tooltip"
+        role="tooltip"
+      >
+        <rect class="svg-tooltip-background" width="170" height="94" rx="9" />
+        <text x="12" y="18" class="svg-tooltip-title">
+          {{ formatMonth(activeItem.month) }}
+        </text>
+        <text x="12" y="36" class="svg-tooltip-label">Total</text>
+        <text x="158" y="36" class="svg-tooltip-value total">
+          {{ activeItem.totalIncidents }}
+        </text>
+        <text x="12" y="52" class="svg-tooltip-label">Low</text>
+        <text x="158" y="52" class="svg-tooltip-value">
+          {{ severityCount(activeItem, 'Low') }}
+        </text>
+        <text x="12" y="68" class="svg-tooltip-label">Medium</text>
+        <text x="158" y="68" class="svg-tooltip-value">
+          {{ severityCount(activeItem, 'Medium') }}
+        </text>
+        <text x="12" y="84" class="svg-tooltip-label">High</text>
+        <text x="158" y="84" class="svg-tooltip-value">
+          {{ severityCount(activeItem, 'High') }}
+        </text>
+      </g>
+
     </svg>
 
     <div class="chart-legend" aria-label="incident chart legend">

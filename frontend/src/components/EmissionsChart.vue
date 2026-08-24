@@ -1,11 +1,31 @@
 <script setup lang="ts">
-import { computed } from 'vue'
+import { computed, ref } from 'vue'
 
 import type { MonthlyEmission } from '../types'
 
 const props = defineProps<{
   data: MonthlyEmission[]
 }>()
+
+const activeIndex = ref<number | null>(null)
+
+const activeItem = computed(() => {
+  if (activeIndex.value === null) {
+    return null
+  }
+
+  return props.data[activeIndex.value] ?? null
+})
+
+const tooltipX = computed(() => {
+  if (activeIndex.value === null) {
+    return 0
+  }
+
+  const center = xPosition(activeIndex.value, 0)
+
+  return Math.min(Math.max(center - 95, 4), width - 194)
+})
 
 // use one coordinate system so the SVG scales responsively
 const width = 760
@@ -87,10 +107,22 @@ function formatTonnes(value: number): string {
     maximumFractionDigits: 0,
   }).format(value / 1_000)
 }
+function showTooltip(index: number): void {
+  activeIndex.value = index
+}
+
+function hideTooltip(): void {
+  activeIndex.value = null
+}
+
+function emissionAriaLabel(item: MonthlyEmission): string {
+  return `${formatMonth(item.month)}, Scope 1 ${formatTonnes(item.scope1KgCO2e)} tonnes CO2e, Scope 2 ${formatTonnes(item.scope2KgCO2e)} tonnes CO2e, total ${formatTonnes(item.totalKgCO2e)} tonnes CO2e`
+}
+
 </script>
 
 <template>
-  <div class="chart-wrap">
+  <div class="chart-wrap interactive-chart">
     <svg
       class="chart"
       :viewBox="`0 0 ${width} ${height}`"
@@ -114,7 +146,20 @@ function formatTonnes(value: number): string {
         </text>
       </g>
 
-      <g v-for="(item, index) in data" :key="item.month">
+      <g
+        v-for="(item, index) in data"
+        :key="item.month"
+        class="chart-group"
+        :class="{ active: activeIndex === index }"
+        tabindex="0"
+        role="img"
+        :aria-label="emissionAriaLabel(item)"
+        @mouseenter="showTooltip(index)"
+        @mouseleave="hideTooltip"
+        @focus="showTooltip(index)"
+        @blur="hideTooltip"
+        @click="showTooltip(index)"
+      >
         <rect
           :x="xPosition(index, -barWidth - 1)"
           :y="plotTop + plotHeight - barHeight(item.scope1KgCO2e)"
@@ -123,10 +168,6 @@ function formatTonnes(value: number): string {
           rx="3"
           class="bar bar-scope-1"
         >
-          <title>
-            {{ formatMonth(item.month) }} Scope 1:
-            {{ formatTonnes(item.scope1KgCO2e) }} t CO2e
-          </title>
         </rect>
         <rect
           :x="xPosition(index, 1)"
@@ -136,10 +177,6 @@ function formatTonnes(value: number): string {
           rx="3"
           class="bar bar-scope-2"
         >
-          <title>
-            {{ formatMonth(item.month) }} Scope 2:
-            {{ formatTonnes(item.scope2KgCO2e) }} t CO2e
-          </title>
         </rect>
         <text
           v-if="index % 3 === 0 || index === data.length - 1"
@@ -150,6 +187,30 @@ function formatTonnes(value: number): string {
           {{ formatMonth(item.month) }}
         </text>
       </g>
+      <g
+        v-if="activeItem"
+        :transform="`translate(${tooltipX}, 8)`"
+        class="svg-tooltip"
+        role="tooltip"
+      >
+        <rect class="svg-tooltip-background" width="190" height="78" rx="9" />
+        <text x="12" y="19" class="svg-tooltip-title">
+          {{ formatMonth(activeItem.month) }}
+        </text>
+        <text x="12" y="38" class="svg-tooltip-label">Scope 1</text>
+        <text x="178" y="38" class="svg-tooltip-value">
+          {{ formatTonnes(activeItem.scope1KgCO2e) }} t CO2e
+        </text>
+        <text x="12" y="54" class="svg-tooltip-label">Scope 2</text>
+        <text x="178" y="54" class="svg-tooltip-value">
+          {{ formatTonnes(activeItem.scope2KgCO2e) }} t CO2e
+        </text>
+        <text x="12" y="70" class="svg-tooltip-label">Total</text>
+        <text x="178" y="70" class="svg-tooltip-value total">
+          {{ formatTonnes(activeItem.totalKgCO2e) }} t CO2e
+        </text>
+      </g>
+
     </svg>
 
     <div class="chart-legend" aria-label="emissions chart legend">

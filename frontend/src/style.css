@@ -533,6 +533,63 @@ h1 {
   scrollbar-width: thin;
 }
 
+.chart-group {
+  cursor: pointer;
+  outline: none;
+}
+
+.chart-group.active .bar,
+.chart-group.active .incident-bar {
+  opacity: 0.68;
+  stroke: var(--white);
+  stroke-width: 1;
+}
+
+.chart-group:focus-visible .bar,
+.chart-group:focus-visible .incident-bar {
+  stroke: var(--forest);
+  stroke-width: 2;
+}
+
+.svg-tooltip {
+  pointer-events: none;
+}
+
+.svg-tooltip-background {
+  fill: var(--white);
+  stroke: #d8d6cd;
+  stroke-width: 1;
+  filter: drop-shadow(0 5px 9px rgba(20, 47, 39, 0.16));
+}
+
+.svg-tooltip-title,
+.svg-tooltip-label,
+.svg-tooltip-value {
+  font-family: inherit;
+}
+
+.svg-tooltip-title {
+  fill: var(--forest-deep);
+  font-size: 10px;
+  font-weight: 800;
+}
+
+.svg-tooltip-label {
+  fill: #71827a;
+  font-size: 9px;
+}
+
+.svg-tooltip-value {
+  fill: #52655d;
+  font-size: 9px;
+  font-weight: 700;
+  text-anchor: end;
+}
+
+.svg-tooltip-value.total {
+  fill: var(--forest-deep);
+}
+
 .chart {
   display: block;
   width: 100%;
